@@ -31,7 +31,10 @@ spec_channels = {'LeftForeArm': ['Zrotation'], 'RightForeArm': ['Zrotation'],
 pname = '/data1/lty/dataset/egopose_dataset/datasets/traj/1205_take_15_traj.p'
 traj = pickle.load(open(pname, 'rb'))
 traj_frame = torch.Tensor(traj[:][0]).unsqueeze(0)
-print("traj ", traj_frame.shape)
+print("traj ", traj.shape)
+joint = traj[69][6:9]
+print("joint: ",joint)
+
 # config_path = '/data1/lty/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml'
 # with open(config_path, 'r') as f:
 #     config = yaml.load(f.read(),Loader=yaml.FullLoader)
@@ -49,3 +52,17 @@ dataset_path = "/data1/lty/dataset/ego_datasets"
 img_dir = "r0310_take_24"
 path = os.path.join(dataset_path, "fpv_frames", img_dir)
 print(path)
+
+a = [[[[1.,2.,3.], [3.,2.,1.], [4.,5.,6.]],[[1.,2.,3.], [3,2,1], [4,5,6]]], [[[1,2,3], [3,2,1], [4,5,6]],[[1,2,3], [3,2,1], [4,5,6]]]]
+b = [[[[1,2,3], [3,2,1], [4,5,6]],[[1,2,3], [3,2,1], [4,5,6]]], [[[1,2,3], [3,2,1], [4,5,6]],[[1,2,3], [3,2,1], [4,5,6]]]]
+c = [[1,2,3], [4,5,6], [7,8,9]]
+a = torch.Tensor(a)
+c = torch.tensor(c)
+print(a.shape)
+print(c.size)
+print(c.shape.append(1))
+# d = torch.cat([a.view(-1,3,3),c.view(1,3,3)], dim=0)
+# print(d.shape)
+# b = torch.zeros_like(a)
+# a = torch.where(a > 3., b, a)
+# print(a)

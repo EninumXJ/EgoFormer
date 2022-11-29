@@ -33,6 +33,27 @@ class GroupScale(object):
     def __call__(self, img_group):
         return [self.worker(img) for img in img_group]
 
+class Scale():
+    def __init__(self, size, interpolation=Image.BILINEAR):
+        self.worker = torchvision.transforms.Scale(size, interpolation)
+
+    def __call__(self, img):
+        return self.worker(img)
+
+class Stack(object):
+
+    def __init__(self, roll=False):
+        self.roll = roll
+
+    def __call__(self, img_group):
+        if img_group[0].mode == 'L':
+            return np.concatenate([np.expand_dims(x, 2) for x in img_group], axis=2)
+        elif img_group[0].mode == 'RGB':
+            if self.roll:
+                return np.concatenate([np.array(x)[:, :, ::-1] for x in img_group], axis=2)
+            else:
+                return np.concatenate(img_group, axis=2)
+
 class ToTorchFormatTensor(object):
     """ Converts a PIL.Image (RGB) or numpy.ndarray (H x W x C) in the range [0, 255]
     to a torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0] """
@@ -54,6 +75,8 @@ class ToTorchFormatTensor(object):
 
 if __name__ == "__main__":
     trans = torchvision.transforms.Compose([
+        Scale(256),
+        #Stack(),
         ToTorchFormatTensor(),
         GroupNormalize(
             mean=[.485, .456, .406],
@@ -61,5 +84,6 @@ if __name__ == "__main__":
         )]
     )
     img = Image.open('../../../dataset/egopose_dataset/datasets/fpv_frames/r0310_take_24/00000.png')
+    #color_group = [img] * 3
     image = trans(img)
     print(image.shape)
