@@ -1,68 +1,72 @@
-import numpy as np
-import math
-from bvh import Bvh
-import pickle
-import yaml
-from mocap.pose import load_bvh_file
-from mocap.skeleton import Skeleton
-from utils.transformation import quaternion_slerp, quaternion_from_euler, euler_from_quaternion
-import os.path
 import torch
+from torch.utils.data import DataLoader
+from ego_pose.data_process import MoCapDataset
+from ego_pose.transforms import *
+from ego_pose.model import *
+from ego_pose.loss import *
+import shutil
+from opts import parser
+import torch.optim
+import torch.nn.parallel
+from torch.nn.utils import clip_grad_norm
+import os
+import time
+from tqdm import tqdm
+from train import build_foreground, build_motion_history
+from utils.visualize import DrawSkeleton
 
-fname = '/data1/lty/dataset/egopose_dataset/datasets/traj/1205_take_15.bvh'
-with open(fname) as f:
-    mocap = Bvh(f.read())
-print("Number of joints: ",len(mocap.get_joints_names()))
-print("Number of frames: ", mocap.nframes)
-print(mocap.get_joints_names())
-### channels of a joint is position & rotation in X Y Z
-print(mocap.joint_channels('Hips'))
-print(mocap.joint_offset('Hips'))
-#print(mocap.joint_parent('Spine').name)
+exp_name = 'train01'
+path = os.getcwd()
+save_path = os.path.join(path, 'results', exp_name)
+if not os.path.exists(save_path):
+    os.makedirs(save_path) 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = EgoNet()
 
-skeleton = Skeleton()
-exclude_bones = {'Thumb', 'Index', 'Middle', 'Ring', 'Pinky', 'End', 'Toe'}
-spec_channels = {'LeftForeArm': ['Zrotation'], 'RightForeArm': ['Zrotation'],
-                 'LeftLeg': ['Xrotation'], 'RightLeg': ['Xrotation']}
-# skeleton.load_from_bvh(fname, exclude_bones, spec_channels)
-# poses, bone_addr = load_bvh_file(fname, skeleton)
-# print("poses: ", poses)
-# print("bone_addr: ", bone_addr)
-pname = '/data1/lty/dataset/egopose_dataset/datasets/traj/1205_take_15_traj.p'
-traj = pickle.load(open(pname, 'rb'))
-traj_frame = torch.Tensor(traj[:][0]).unsqueeze(0)
-print("traj ", traj.shape)
-joint = traj[69][6:9]
-print("joint: ",joint)
+dataset_path = '/data1/lty/dataset/egopose_dataset/datasets'
+config_path = '/data1/lty/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml'
+### load checkpoints if exist
 
-# config_path = '/data1/lty/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml'
-# with open(config_path, 'r') as f:
-#     config = yaml.load(f.read(),Loader=yaml.FullLoader)
-# train_split = config['train']
-# print(train_split)
-# test_split = config['test']
-# train_sync = [config['video_mocap_sync'][i] for i in train_split]
-# print(train_sync)
-str1 = "abcdfr"
-print(str1[:-4])
-a = [[1,2,3,4],
-     [5,6,7,8]]
-print(a[0][0:2])
-dataset_path = "/data1/lty/dataset/ego_datasets"
-img_dir = "r0310_take_24"
-path = os.path.join(dataset_path, "fpv_frames", img_dir)
-print(path)
+resume = 'logs/train01/baseline_stage1_checkpoint.pth.tar'
+# checkpoint = torch.load(resume)
+# model.load_state_dict(checkpoint['state_dict'])
+# model = nn.DataParallel(model, device_ids=[0,1]).cuda()
+model.load_state_dict({k.replace('module.',''):v for k,v in torch.load(resume)['state_dict'].items()})   
+model = model.to(device)
+val_data = MoCapDataset(dataset_path=dataset_path, 
+                              config_path=config_path, 
+                              image_tmpl="{:05d}.png", 
+                              image_transform=torchvision.transforms.Compose([
+                                        Scale(256),
+                                        ToTorchFormatTensor(),
+                                        GroupNormalize(
+                                            mean=[.485, .456, .406],
+                                            std=[.229, .224, .225])
+                                        ]), test_mode=True)
 
-a = [[[[1.,2.,3.], [3.,2.,1.], [4.,5.,6.]],[[1.,2.,3.], [3,2,1], [4,5,6]]], [[[1,2,3], [3,2,1], [4,5,6]],[[1,2,3], [3,2,1], [4,5,6]]]]
-b = [[[[1,2,3], [3,2,1], [4,5,6]],[[1,2,3], [3,2,1], [4,5,6]]], [[[1,2,3], [3,2,1], [4,5,6]],[[1,2,3], [3,2,1], [4,5,6]]]]
-c = [[1,2,3], [4,5,6], [7,8,9]]
-a = torch.Tensor(a)
-c = torch.tensor(c)
-print(a.shape)
-print(c.size)
-print(c.shape.append(1))
-# d = torch.cat([a.view(-1,3,3),c.view(1,3,3)], dim=0)
-# print(d.shape)
-# b = torch.zeros_like(a)
-# a = torch.where(a > 3., b, a)
-# print(a)
+val_loader = DataLoader(dataset=val_data, batch_size=1, 
+                        shuffle=False, num_workers=1, pin_memory=True)
+
+for i, (image, label, R, d) in tqdm(enumerate(val_loader), total=len(val_loader)):
+    with torch.no_grad():
+        label = label.to(device)
+        foreground = build_foreground(image)
+        foreground = foreground.to(device)
+        motion_input = build_motion_history(R, d)
+        motion_input = motion_input.to(device)
+        print(foreground.shape)
+        print(motion_input.shape)
+        keypoint, head1, head2 = model(foreground, motion_input)
+        
+        image_name = 'Skeleton'+'_'+str(i)+'.jpg'
+        image_path = os.path.join(save_path, image_name)
+        label_name = 'Label'+'_'+str(i)+'.jpg'
+        label_path = os.path.join(save_path, label_name)
+        keypoint = keypoint.cpu()
+        head1 = head1.cpu()
+        head2 = head2.cpu()
+        label = label.cpu()
+        print(label)
+        
+        DrawSkeleton(label.squeeze()[6:], label.squeeze()[0:3], label.squeeze()[3:6], label_path)
+        DrawSkeleton(keypoint[0], head1[0], head2[0], image_path)

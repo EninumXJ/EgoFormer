@@ -7,36 +7,32 @@ from mocap.pose import load_bvh_file, interpolated_traj
 from bvh import Bvh
 import pickle
 import math
+import numpy as np
 import torch.nn.functional as F
 
 subject_config = "meta_subject_01.yaml"
 
-def get_rotation_matrix(z_deg, x_deg, y_deg):
-    Rz = torch.tensor([[math.cos(z_deg/180.*math.pi), -math.sin(z_deg/180.*math.pi), 0],
-                       [math.sin(z_deg/180.*math.pi), math.cos(z_deg/180.*math.pi), 0],
-                       [0, 0, 1]])
+def get_rotation_matrix(x_rad, y_rad, z_rad):
     Rx = torch.tensor([[1, 0, 0],
-                       [0, math.cos(x_deg/180.*math.pi), -math.sin(x_deg/180.*math.pi)],
-                       [0, math.sin(x_deg/180.*math.pi), math.cos(x_deg/180.*math.pi)]])
-    Ry = torch.tensor([[math.cos(y_deg/180.*math.pi), 0, math.sin(y_deg/180.*math.pi)],
-                       [0, 1, 0],
-                       [-math.sin(y_deg/180.*math.pi), 0, math.cos(y_deg/180.*math.pi)]])
-    return Rz@Rx@Ry
+                        [0, math.cos(x_rad), -math.sin(x_rad)],
+                        [0, math.sin(x_rad), math.cos(x_rad)]])
+    Ry = torch.tensor([[math.cos(y_rad), 0, math.sin(y_rad)],
+                        [0, 1, 0],
+                        [-math.sin(y_rad), 0, math.cos(y_rad)]])
+    Rz = torch.tensor([[math.cos(z_rad), -math.sin(z_rad), 0],
+                        [math.sin(z_rad), math.cos(z_rad), 0],
+                        [0, 0, 1]])
+    return Rx@Ry@Rz
 
 def load_joint_offset(mocap, joint):
     joint_offset = mocap.joint_offset(joint)
-    return torch.Tensor([[joint_offset[0], joint_offset[1], joint_offset[2]]])
+    return torch.Tensor([[joint_offset[0], joint_offset[1], joint_offset[2]]]).T
 
 # traj:将要读取的traj文件; index: 该关节在数组中的索引位置; idx:某一帧的帧数
 def load_joint_rotation(traj, index, idx):
-    print("index: ",index)
-    print("idx: ",idx)
     if(index[1]-index[0] == 3):
         joint_rotation = traj[idx][index[0]:index[1]]
         return get_rotation_matrix(joint_rotation[0], joint_rotation[1], joint_rotation[2])
-    else:
-        joint_rotation = traj[idx][index[0]]
-        return get_rotation_matrix(0, joint_rotation, 0)
 
 class MoCapDataset(Dataset):
     def __init__(self, dataset_path, config_path, image_tmpl, image_transform=None, mocap_fr=30, test_mode=False):
@@ -72,114 +68,127 @@ class MoCapDataset(Dataset):
         return Image.open(os.path.join(directory, self.image_tmpl.format(idx))).convert('RGB')
 
     # load mocap offset from bvh file
-    def _load_offset(self, bvh):
+    def _load_offset(self, mocap):
         # Hips->Spine->Spine1->Spine2->Spine3->Neck->Head
-        with open(bvh) as f:
-            mocap = Bvh(f.read())
-        hips_offset = mocap.joint_offset('Hips')
-        hips = torch.Tensor([[hips_offset[0], hips_offset[1], hips_offset[2]]])
-        spine_offset = mocap.joint_offset('Spine')
-        spine = torch.Tensor([[spine_offset[0], spine_offset[1], spine_offset[2]]])
-        spine1_offset = mocap.joint_offset('Spine1')
-        spine1 = torch.Tensor([[spine1_offset[0], spine1_offset[1], spine1_offset[2]]])
-        spine2_offset = mocap.joint_offset('Spine2')
-        spine2 = torch.Tensor([[spine2_offset[0], spine2_offset[1], spine2_offset[2]]])
-        spine3_offset = mocap.joint_offset('Spine3')
-        spine3 = torch.Tensor([[spine3_offset[0], spine3_offset[1], spine3_offset[2]]])
-        neck_offset = mocap.joint_offset('Neck')
-        neck = torch.Tensor([[neck_offset[0], neck_offset[1], neck_offset[2]]])
-        head_offset = mocap.joint_offset('Head')
-        head = torch.Tensor([[head_offset[0], head_offset[1], head_offset[2]]])
-        return {"Hips":hips, "Spine":spine, "Spine1":spine1, 
-                "Spine2":spine2, "Spine3":spine3, "Neck":neck, "Head":head}
+        joint_name = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Spine3', 'Neck', 'Head',
+                        'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand',
+                        'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand',
+                        'RightUpLeg', 'RightLeg', 'RightFoot',
+                        'LeftUpLeg', 'LeftLeg', 'LeftFoot']
+        joint_offset = {}
+        for joint in joint_name:
+            offset_ = mocap.joint_offset(joint)
+            offset = torch.Tensor([[offset_[0], offset_[1], offset_[2]]]).T
+            joint_offset[joint] = offset
+        return joint_offset
             
     def _load_rotation(self, traj, idx):
         # bvh rotation: Z axis, X axis, Y axis
         # Hip has 6 channels: [translation, rotation]
         # idx: current frame in a bvh file
         # traj = pickle.load(open(directory, 'rb'))
+        x_hips = torch.Tensor([[traj[idx][0], traj[idx][1], traj[idx][2]]]).T
+        r_hips = load_joint_rotation(traj, (3,6), idx) 
+        r_spine = load_joint_rotation(traj, (6,9), idx)     
+        r_spine1 = load_joint_rotation(traj, (9,12), idx) 
+        r_spine2 = load_joint_rotation(traj, (12,15), idx)
+        r_spine3 = load_joint_rotation(traj, (15,18), idx) 
+        r_neck = load_joint_rotation(traj, (18,21), idx) 
+        r_head = load_joint_rotation(traj, (21,24), idx) 
+        r_RightShoulder = load_joint_rotation(traj, (24,27), idx)  
+        r_RightArm = load_joint_rotation(traj, (27,30), idx) 
+        r_RightForeArm = load_joint_rotation(traj, (30,33), idx) 
+        r_RightHand = load_joint_rotation(traj, (33,36), idx) 
+        r_LeftShoulder = load_joint_rotation(traj, (36, 39), idx)   
+        r_LeftArm = load_joint_rotation(traj, (39, 42), idx) 
+        r_LeftForeArm = load_joint_rotation(traj, (42, 45), idx) 
+        r_LeftHand = load_joint_rotation(traj, (45, 48), idx)
+        r_RightUpLeg = load_joint_rotation(traj, (48, 51), idx) 
+        r_RightLeg = load_joint_rotation(traj, (51, 54), idx) 
+        r_RightFoot = load_joint_rotation(traj, (54, 57), idx) 
+        r_LeftUpLeg = load_joint_rotation(traj, (57, 60), idx) 
+        r_LeftLeg = load_joint_rotation(traj, (60, 63), idx) 
+        r_LeftFoot = load_joint_rotation(traj, (63, 66), idx) 
         
-        hips_rotation = traj[idx][3:6]
-        R_hips = get_rotation_matrix(hips_rotation[0], hips_rotation[1], hips_rotation[2]) 
-        spine_rotation = traj[idx][6:9]
-        R_spine = get_rotation_matrix(spine_rotation[0], spine_rotation[1], spine_rotation[2]) 
-        spine1_rotation = traj[idx][9:12]
-        R_spine1 = get_rotation_matrix(spine1_rotation[0], spine1_rotation[1], spine1_rotation[2])
-        spine2_rotation = traj[idx][12:15]
-        R_spine2 = get_rotation_matrix(spine2_rotation[0], spine2_rotation[1], spine2_rotation[2])
-        spine3_rotation = traj[idx][15:18]
-        R_spine3 = get_rotation_matrix(spine3_rotation[0], spine3_rotation[1], spine3_rotation[2])
-        neck_rotation = traj[idx][18:21]
-        R_neck = get_rotation_matrix(neck_rotation[0], neck_rotation[1], neck_rotation[2])
-        head_rotation = traj[idx][21:24]  # 31*3
-        R_head = get_rotation_matrix(head_rotation[0], head_rotation[1], head_rotation[2])
-        #rotation = R_hips @ R_spine @ R_spine1 @ R_spine2 @ R_spine3 @ R_neck @ R_head
-        return {"Hips":R_hips, "Spine":R_spine, "Spine1":R_spine1, 
-                "Spine2":R_spine2, "Spine3":R_spine3, "Neck":R_neck, "Head":R_head}
+        R_hips = r_hips
+        R_spine = R_hips@r_spine
+        R_spine1 = R_spine@r_spine1
+        R_spine2 = R_spine1@r_spine2
+        R_spine3 = R_spine2@r_spine3
+        R_neck = R_spine3@r_neck
+        R_head = R_neck@r_head
+        R_rightShoulder = R_spine3@r_RightShoulder
+        R_rightArm = R_rightShoulder@r_RightArm
+        R_rightForeArm = R_rightArm@r_RightForeArm
+        R_rightHand = R_rightForeArm@r_RightHand
+        R_leftShoulder = R_spine3@r_LeftShoulder
+        R_leftArm = R_leftShoulder@r_LeftArm
+        R_leftForeArm = R_leftArm@r_LeftForeArm
+        R_leftHand = R_leftForeArm@r_LeftHand
+        R_rightUpLeg = R_hips@r_RightUpLeg
+        R_rightLeg = R_rightUpLeg@r_RightLeg
+        R_rightFoot = R_rightLeg@r_RightFoot
+        R_leftUpLeg = R_hips@r_LeftUpLeg
+        R_leftLeg = R_leftUpLeg@r_LeftLeg
+        R_leftFoot = R_leftLeg@r_LeftFoot
+        return {"translation":x_hips, "Hips":R_hips, "Spine":R_spine, "Spine1":R_spine1, "Spine2":R_spine2, "Spine3":R_spine3,
+                "Neck":R_neck, "Head":R_head, "RightShoulder":R_rightShoulder, "RightArm":R_rightArm, "RightForeArm":R_rightForeArm, 
+                "RightHand":R_rightHand, "LeftShoulder":R_leftShoulder, "LeftArm":R_leftArm, "LeftForeArm":R_leftForeArm, 
+                "LeftHand":R_leftHand, "RightUpLeg":R_rightUpLeg, "RightLeg":R_rightLeg, "RightFoot":R_rightFoot,
+                "LeftUpLeg":R_leftUpLeg, "LeftLeg":R_leftLeg, "LeftFoot":R_leftFoot}
 
     # traj: .p文件名称
     # idx: 当前的视频帧 
-    def _load_transform(self, traj, bvh_file, idx):
+    def _load_transform(self, offset, traj, idx):
         #bvh_file = os.path.join(traj[:-5], '.bvh')  ## '0213_take_01_traj.p'->'0213_take_01'+'.bvh'
-        rotation = {}
-        offset = {}
-        offset = self._load_offset(bvh_file)
-        print("idx: ", idx)
         rotation = self._load_rotation(traj, idx)
-        Translation = offset["Hips"]@rotation["Hips"] + offset["Spine"]@rotation["Spine"] + offset["Spine1"]@rotation["Spine1"] + \
-                      offset["Spine2"]@rotation["Spine2"] + offset["Spine3"]@rotation["Spine3"] + offset["Neck"]@rotation["Neck"] + offset["Head"]@rotation["Head"]
-        Rotation = rotation["Hips"]@rotation["Spine"]@rotation["Spine1"]@rotation["Spine2"]@rotation["Spine3"]@rotation["Neck"]@rotation["Head"]
-        return Translation, Rotation
+        # print("frame: ", idx)
+        Translation = rotation["translation"] + rotation["Spine"]@offset["Spine"] + rotation["Spine1"]@offset["Spine1"] + \
+                      rotation["Spine2"]@offset["Spine2"] + rotation["Spine3"]@offset["Spine3"] + rotation["Neck"]@offset["Neck"] + rotation["Head"]@offset["Head"]
+        Rotation = rotation["Head"]
+        return Translation.T, Rotation
     
-    def _load_f_u(self, traj, mocap, bvh_file, idx):
+    def _load_f_u(self, rotation, offset):
         # bvh_file = os.path.join(traj_file[:-5], '.bvh')  ## '0213_take_01_traj.p'->'0213_take_01'+'.bvh'
-        rotation = {}
-        offset = {}
-        offset = self._load_offset(bvh_file)
-        rotation = self._load_rotation(traj, idx)
-        neck = load_joint_offset(mocap, 'Spine')@load_joint_rotation(traj, (6,9), idx) \
-             + load_joint_offset(mocap, 'Spine1')@load_joint_rotation(traj, (9,12), idx) \
-             + load_joint_offset(mocap, 'Spine2')@load_joint_rotation(traj, (12,15), idx) \
-             + load_joint_offset(mocap, 'Spine3')@load_joint_rotation(traj, (15,18), idx) \
-             + load_joint_offset(mocap, 'Neck')@load_joint_rotation(traj, (18,21), idx)
-        f = neck + offset["Neck"]@rotation["Neck"]
+        f = rotation["Head"]@offset["Head"]
         F.normalize(f, dim=1)
         # 我们假设u向量是f向量绕y轴顺时针旋转90度
-        u = f@get_rotation_matrix(0, 0, -90)
-        return f, u
+        u = get_rotation_matrix(0, -90/180*math.pi, 0)@f
+        return f.T, u.T
 
     # 读取身体各个关节在本地坐标系中的坐标位置 一个包含51个元素的tensor
-    def _load_keypoint_positon(self, traj, mocap, idx):
-        hips = torch.Tensor([[0, 0, 0]])  # 1*3
-        neck = load_joint_offset(mocap, 'Spine')@load_joint_rotation(traj, (6,9), idx) \
-             + load_joint_offset(mocap, 'Spine1')@load_joint_rotation(traj, (9,12), idx) \
-             + load_joint_offset(mocap, 'Spine2')@load_joint_rotation(traj, (12,15), idx) \
-             + load_joint_offset(mocap, 'Spine3')@load_joint_rotation(traj, (15,18), idx) \
-             + load_joint_offset(mocap, 'Neck')@load_joint_rotation(traj, (18,21), idx)
-        head = neck + load_joint_offset(mocap, 'Head')@load_joint_rotation(traj, (21,24), idx)
-        RightShoulder = neck + load_joint_offset(mocap, 'RightShoulder')@load_joint_rotation(traj, (24,27), idx)
-        RightArm = RightShoulder + load_joint_offset(mocap, 'RightArm')@load_joint_rotation(traj, (27,30), idx)
-        RightHand = RightArm + load_joint_offset(mocap, 'RightForeArm')@load_joint_rotation(traj, (30, 31), idx) \
-                   + load_joint_offset(mocap, 'RightHand')@load_joint_rotation(traj, (31,34), idx)
-        LeftShoulder = neck + load_joint_offset(mocap, 'LeftShoulder')@load_joint_rotation(traj, (34,37), idx)
-        LeftArm = LeftShoulder + load_joint_offset(mocap, 'LeftArm')@load_joint_rotation(traj, (37,40), idx)
-        LeftHand = LeftArm + load_joint_offset(mocap, 'LeftForeArm')@load_joint_rotation(traj, (40, 41), idx) \
-                  + load_joint_offset(mocap, 'LeftHand')@load_joint_rotation(traj, (41,44), idx)
-        RightUpLeg = hips + load_joint_offset(mocap, 'RightUpLeg')@load_joint_rotation(traj, (44,47), idx)
-        RightLeg = RightUpLeg + load_joint_offset(mocap, 'RightLeg')@load_joint_rotation(traj, (47,48), idx)
-        RightFoot = RightLeg + load_joint_offset(mocap, 'RightFoot')@load_joint_rotation(traj, (48,51), idx)
-        LeftUpLeg = hips + load_joint_offset(mocap, 'LeftUpLeg')@load_joint_rotation(traj, (51,54), idx)
-        LeftLeg = LeftUpLeg + load_joint_offset(mocap, 'LeftLeg')@load_joint_rotation(traj, (54,55), idx)
-        LeftFoot = LeftLeg + load_joint_offset(mocap, 'LeftFoot')@load_joint_rotation(traj, (55,58), idx)
-        return torch.cat([hips, neck, head, RightShoulder, RightArm, RightHand, LeftShoulder, LeftArm, LeftHand,
-                          RightUpLeg, RightLeg, RightFoot, LeftUpLeg, LeftLeg, LeftFoot], dim=-1)
+    def _load_keypoint_positon(self, rotation, offset):
+        # hips = rotation['translation']@rotation['Hips']
+        hips = rotation['translation']
+        spine3 = hips + rotation['Spine']@offset['Spine'] \
+                    + rotation['Spine1']@offset['Spine1'] \
+                    + rotation['Spine2']@offset['Spine2'] \
+                    + rotation['Spine3']@offset['Spine3'] 
+        neck = spine3 + rotation['Neck']@offset['Neck']
+        head = neck + rotation['Head']@offset['Head']
+        RightShoulder = spine3 + rotation['RightShoulder']@offset['RightShoulder']
+        RightArm = RightShoulder + rotation['RightArm']@offset['RightArm']
+        RightForeArm = RightArm + rotation['RightForeArm']@offset['RightForeArm']
+        RightHand = RightForeArm + rotation['RightHand']@offset['RightHand']
+        LeftShoulder = spine3 + rotation['LeftShoulder']@offset['LeftShoulder']
+        LeftArm = LeftShoulder + rotation['LeftArm']@offset['LeftArm']
+        LeftForeArm = LeftArm + rotation['LeftForeArm']@offset['LeftForeArm']
+        LeftHand = LeftForeArm + rotation['LeftHand']@offset['LeftHand']
+        RightUpLeg = hips + rotation['RightUpLeg']@offset['RightUpLeg']
+        RightLeg = RightUpLeg + rotation['RightLeg']@offset['RightLeg']
+        RightFoot = RightLeg + rotation['RightFoot']@offset['RightFoot']
+        LeftUpLeg = hips + rotation['LeftUpLeg']@offset['LeftUpLeg']
+        LeftLeg = LeftUpLeg + rotation['LeftLeg']@offset['LeftLeg']
+        LeftFoot = LeftLeg + rotation['LeftFoot']@offset['LeftFoot']
+        return torch.cat([hips.T, neck.T, head.T, RightShoulder.T, RightArm.T, RightHand.T, LeftShoulder.T, LeftArm.T,
+                          LeftHand.T, RightUpLeg.T, RightLeg.T, RightFoot.T, LeftUpLeg.T, LeftLeg.T, LeftFoot.T], dim=-1)
 
-    def _build_motion(self, traj, bvh_file, index):
+    def _build_motion(self, offset, traj, index):
         R = []
         D = []
         for i in range(index-31,index):
-            d, r = self._load_transform(traj, bvh_file, i)  # translation and rotation
-            D.append(d)
+            d, r = self._load_transform(offset, traj, i)  # translation and rotation
+            D.append(d)   ### d = 1*3 tensor
             R.append(r)
         
         return torch.stack(R, 0), torch.stack(D, 0)
@@ -189,25 +198,30 @@ class MoCapDataset(Dataset):
         print("index:", index)
         ind = ind_bool.index(True)  # ind表示该index属于第ind个视频
         ind_frame_in_mocap = index - self.data_dict[ind][0] + self.data_sync[ind][1] #确定index所对应的mocap中的帧数
-        ind_frame_in_video = ind_frame_in_mocap - 4
+        #ind_frame_in_video = ind_frame_in_mocap - 4
+        ind_frame_in_video = ind_frame_in_mocap + self.data_sync[ind][0]
+        print("ind_frame_in_video: ", ind_frame_in_video)
+        print("ind_frame_in_mocap: ", ind_frame_in_mocap)
         if(ind_frame_in_video < 32):
             print("index out of bounds")
             return
         dir = self.data_list[ind]
         image_dir = os.path.join(self.dataset_path, "fpv_frames", dir)
-        traj_file = dir + "_traj.p"
-        traj_path = os.path.join(self.dataset_path, "traj", traj_file)
+        traj_file = dir + ".npy"
+        traj_path = "data/" + traj_file
         bvh_file = dir + ".bvh"
         bvh_path = os.path.join(self.dataset_path, "traj", bvh_file)
         with open(bvh_path) as f:
             mocap = Bvh(f.read())
-        traj = pickle.load(open(traj_path, 'rb'))
+        traj = np.load(traj_path)[:-1]
         image = self._load_image(image_dir, ind_frame_in_video)
-        keypoints = self._load_keypoint_positon(traj, mocap, ind_frame_in_mocap)
-        f, u = self._load_f_u(traj, mocap, bvh_path, ind_frame_in_mocap)
+
+        rotation = self._load_rotation(traj, ind_frame_in_mocap)
+        offset = self._load_offset(mocap)
+        keypoints = self._load_keypoint_positon(rotation, offset)
+        f, u = self._load_f_u(rotation, offset)
         label = torch.cat([f, u, keypoints], dim=1)
-        R, d = self._build_motion(traj, bvh_path, ind_frame_in_mocap)
-        print(image)
+        R, d = self._build_motion(offset, traj, ind_frame_in_mocap)
         return self.transform(image), label, R, d
 
     def __len__(self):
