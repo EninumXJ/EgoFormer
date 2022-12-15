@@ -81,7 +81,7 @@ def main():
         adjust_learning_rate(optimizer, epoch, args.lr_steps)
 
         # train for one epoch
-        # train(train_loader, model, optimizer, epoch, device)
+        train(train_loader, model, optimizer, epoch, device)
 
         # evaluate on validation set
         if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
@@ -95,7 +95,7 @@ def main():
                 'state_dict': model.state_dict(),
                 'loss': loss1,
             }, save_path, is_best)
-        train(train_loader, model, optimizer, epoch, device)
+        # train(train_loader, model, optimizer, epoch, device)
 
 def train(train_loader, model, optimizer, epoch, device):
     # dataset_path = '/data1/lty/dataset/egopose_dataset/datasets'
@@ -104,13 +104,14 @@ def train(train_loader, model, optimizer, epoch, device):
     data_time = AverageMeter()
     losses = AverageMeter()
     end = time.time()
-    for i, (image, label, R, d) in tqdm(enumerate(train_loader), total=len(train_loader)):
+    for i, (image, label, motion) in tqdm(enumerate(train_loader), total=len(train_loader)):
         data_time.update(time.time() - end)
         label = label.to(device)
-        foreground = build_foreground(image)
+        with torch.no_grad():
+            foreground = build_foreground(image)
         foreground = foreground.to(device)
-        motion_input = build_motion_history(R, d)
-        motion_input = motion_input.to(device)
+        motion_input = motion.to(device)
+        
         keypoint, head1, head2 = model(foreground, motion_input)
         
         loss = ComputeLoss(keypoint, head1, head2, label)
@@ -141,20 +142,21 @@ def validate(val_loader, model, device, logger=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
     end = time.time()
-    for i, (image, label, R, d) in tqdm(enumerate(val_loader), total=len(val_loader)):
-        label = label.to(device)
-        foreground = build_foreground(image)
-        foreground = foreground.to(device)
-        motion_input = build_motion_history(R, d)
-        motion_input = motion_input.to(device)
-        keypoint, head1, head2 = model(foreground, motion_input)
-        
-        loss = ComputeLoss(keypoint, head1, head2, label)
-        losses.update(loss.item(), image.shape[0])
+    for i, (image, label, motion) in tqdm(enumerate(val_loader), total=len(val_loader)):
+        with torch.no_grad():
+            label = label.to(device)
+            foreground = build_foreground(image)
+            # motion_input = build_motion_history(R, d)
+            foreground = foreground.to(device)
+            motion_input = motion.to(device)
+            keypoint, head1, head2 = model(foreground, motion_input)
+            
+            loss = ComputeLoss(keypoint, head1, head2, label)
+            losses.update(loss.item(), image.shape[0])
 
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
 
         if i % args.print_freq == 0:
             print(('Test: [{0}/{1}]\t'
@@ -221,9 +223,7 @@ def build_motion_history(R, d, nframes=31):
         g_hat = 1
         d_hat *= 15 
         g_hat = torch.tensor([0.3*(g_hat - 0.5)]).expand(batch, nframes, 1, 1)
-        # print("R_hat.shape:", R_hat.shape)
-        # print("d_hat.shape:", d_hat.shape)
-        # print("g_hat.shape:", g_hat.shape)
+     
         motion_input = torch.cat([R_hat, d_hat, g_hat], dim=-1).permute(0,2,3,1)  # (b,31,1,13).permute(0,2,3,1)
         # print(motion_input.shape)
         return motion_input
@@ -238,10 +238,9 @@ def build_foreground(img):
         x_cord, y_cord = torch.meshgrid(x_, y_)
         x = x_cord.reshape(1, 1, img_h, img_w).expand(batch, 1, img_h, img_w)
         y = y_cord.reshape(1, 1, img_h, img_w).expand(batch, 1, img_h, img_w)
-        # print("x.shape:", x.shape)
-        # print("y.shape:", y.shape)
+        
         foreground = torch.cat([img, x, y], dim=1) # b,3,256,256 -> b,5,256,256  
         return foreground
 
-if __name__ == '__main__':
+if __name__ == '__main__': 
     main()

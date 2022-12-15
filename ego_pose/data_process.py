@@ -9,6 +9,7 @@ import pickle
 import math
 import numpy as np
 import torch.nn.functional as F
+from ego_pose.camera_pose_recover import *
 
 subject_config = "meta_subject_01.yaml"
 
@@ -195,34 +196,46 @@ class MoCapDataset(Dataset):
 
     def __getitem__(self, index):
         ind_bool = [index in i for i in self.data_dict]
-        print("index:", index)
         ind = ind_bool.index(True)  # ind表示该index属于第ind个视频
         ind_frame_in_mocap = index - self.data_dict[ind][0] + self.data_sync[ind][1] #确定index所对应的mocap中的帧数
         #ind_frame_in_video = ind_frame_in_mocap - 4
         ind_frame_in_video = ind_frame_in_mocap + self.data_sync[ind][0]
-        print("ind_frame_in_video: ", ind_frame_in_video)
-        print("ind_frame_in_mocap: ", ind_frame_in_mocap)
+        # print("ind_frame_in_video: ", ind_frame_in_video)
+        # print("ind_frame_in_mocap: ", ind_frame_in_mocap)
         if(ind_frame_in_video < 32):
             print("index out of bounds")
             return
         dir = self.data_list[ind]
         image_dir = os.path.join(self.dataset_path, "fpv_frames", dir)
         traj_file = dir + ".npy"
-        traj_path = "data/" + traj_file
-        bvh_file = dir + ".bvh"
-        bvh_path = os.path.join(self.dataset_path, "traj", bvh_file)
-        with open(bvh_path) as f:
-            mocap = Bvh(f.read())
-        traj = np.load(traj_path)[:-1]
+        # traj_path = "data/" + traj_file
+        # bvh_file = dir + ".bvh"
+        # bvh_path = os.path.join(self.dataset_path, "traj", bvh_file)
+        # with open(bvh_path) as f:
+        #     mocap = Bvh(f.read())
+        # traj = np.load(traj_path)[:-1]
         image = self._load_image(image_dir, ind_frame_in_video)
-
-        rotation = self._load_rotation(traj, ind_frame_in_mocap)
-        offset = self._load_offset(mocap)
-        keypoints = self._load_keypoint_positon(rotation, offset)
-        f, u = self._load_f_u(rotation, offset)
+        # rotation = self._load_rotation(traj, ind_frame_in_mocap)
+        # offset = self._load_offset(mocap)
+        keypoints_ = torch.from_numpy(np.load(os.path.join(self.dataset_path, "keypoints", dir + ".npy")))[ind_frame_in_mocap, :]
+        keypoints = keypoints_[6:].unsqueeze(0)
+        f = keypoints_[0:3].unsqueeze(0)
+        u = keypoints_[3:6].unsqueeze(0)
+        # keypoints = self._load_keypoint_positon(rotation, offset)
+        ### 将keypoints映射到[-1,1]之间
+        d_max = torch.max(keypoints, dim=1)[0]
+        d_min = torch.min(keypoints, dim=1)[0]
+        dst = d_max - d_min
+        keypoints = ((keypoints - d_min) / dst - 0.5) / 0.5      
+        # f, u = self._load_f_u(rotation, offset)
         label = torch.cat([f, u, keypoints], dim=1)
-        R, d = self._build_motion(offset, traj, ind_frame_in_mocap)
-        return self.transform(image), label, R, d
+        # R, d = self._build_motion(offset, traj, ind_frame_in_mocap)
+        try:
+            motion = poseRecover(image_dir, ind_frame_in_video)
+        except:
+            motion = torch.zeros([1, 13, 31], dtype=torch.float)
+        finally:
+            return self.transform(image), label, motion
 
     def __len__(self):
         len = 0 

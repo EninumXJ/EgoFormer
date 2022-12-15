@@ -1,8 +1,7 @@
 import torch
 
 def BoneLength(joint1, joint2):
-    length = 0
-    length = length + torch.sum(torch.sqrt(torch.sum((joint1-joint2)**2, dim=-1))) 
+    length = torch.sum(torch.sqrt(torch.sum((joint1-joint2)**2, dim=-1))) 
     return length
 
 def ComputeLoss(keypoints, head1, head2, label):

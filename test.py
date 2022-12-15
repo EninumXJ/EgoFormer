@@ -13,9 +13,9 @@ import os
 import time
 from tqdm import tqdm
 from train import build_foreground, build_motion_history
-from utils.visualize import DrawSkeleton
+from utils.visualize import DrawSkeleton45
 
-exp_name = 'train01'
+exp_name = 'train03'
 path = os.getcwd()
 save_path = os.path.join(path, 'results', exp_name)
 if not os.path.exists(save_path):
@@ -27,7 +27,7 @@ dataset_path = '/data1/lty/dataset/egopose_dataset/datasets'
 config_path = '/data1/lty/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml'
 ### load checkpoints if exist
 
-resume = 'logs/train01/baseline_stage1_checkpoint.pth.tar'
+resume = 'logs/train04/baseline_stage1_model_best.pth.tar'
 # checkpoint = torch.load(resume)
 # model.load_state_dict(checkpoint['state_dict'])
 # model = nn.DataParallel(model, device_ids=[0,1]).cuda()
@@ -45,7 +45,7 @@ val_data = MoCapDataset(dataset_path=dataset_path,
                                         ]), test_mode=True)
 
 val_loader = DataLoader(dataset=val_data, batch_size=1, 
-                        shuffle=False, num_workers=1, pin_memory=True)
+                        shuffle=True, num_workers=1, pin_memory=True)
 
 for i, (image, label, R, d) in tqdm(enumerate(val_loader), total=len(val_loader)):
     with torch.no_grad():
@@ -68,5 +68,5 @@ for i, (image, label, R, d) in tqdm(enumerate(val_loader), total=len(val_loader)
         label = label.cpu()
         print(label)
         
-        DrawSkeleton(label.squeeze()[6:], label.squeeze()[0:3], label.squeeze()[3:6], label_path)
-        DrawSkeleton(keypoint[0], head1[0], head2[0], image_path)
+        DrawSkeleton45(label.squeeze()[6:], label.squeeze()[0:3], label.squeeze()[3:6], label_path)
+        DrawSkeleton45(keypoint[0], head1[0], head2[0], image_path)

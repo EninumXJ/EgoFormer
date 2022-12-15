@@ -136,6 +136,7 @@ class EgoNet(nn.Module):
         self.fc1 = nn.Linear(528, 45)
         self.fc2 = nn.Linear(528, 3)
         self.fc3 = nn.Linear(528, 3)
+        self.mapping = nn.Tanh()  ###将关节输出映射到[-1,1]之间
 
     def forward(self, foreground, motion):
         motion_feature = self.motion_net(motion)         # (b,512,1,1)
@@ -158,10 +159,9 @@ class EgoNet(nn.Module):
         shape_feature = self.fc(shape_feature)
        
         # cat
-        print("shape_feature: ", shape_feature.shape)
-        print("motion_feature: ", motion_feature.shape)
+        
         fusion_feature = torch.cat((motion_feature, shape_feature), dim=1)
-        keypoint = self.fc1(fusion_feature)
+        keypoint = self.mapping(self.fc1(fusion_feature))
         head1 = self.fc2(fusion_feature)
         head2 = self.fc3(fusion_feature)
         return keypoint, head1, head2
