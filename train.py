@@ -28,6 +28,8 @@ def main():
     save_path = os.path.join(path, 'logs', args.exp_name)
     if not os.path.exists(save_path):
         os.makedirs(save_path) 
+    ### save hyper parameters
+    save_hyperparameter(args)
     ### load checkpoints if exist
     if args.resume:
         if os.path.isfile(args.resume):
@@ -211,6 +213,15 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+def save_hyperparameter(args):
+    path = os.getcwd()
+    basedir = os.path.join(path, 'logs', args.exp_name)
+    f = os.path.join(basedir, 'args.txt')
+    with open(f, 'w') as file:
+        for arg in sorted(vars(args)):
+            attr = getattr(args, arg)
+            file.write('{} = {}\n'.format(arg, attr))
 
 def build_motion_history(R, d, nframes=31):
         batch = R.shape[0]
