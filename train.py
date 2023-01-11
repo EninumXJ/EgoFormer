@@ -12,6 +12,7 @@ from torch.nn.utils import clip_grad_norm
 import os
 import time
 from tqdm import tqdm
+import logging
 
 def main():
     global args, best_loss
@@ -30,6 +31,8 @@ def main():
         os.makedirs(save_path) 
     ### save hyper parameters
     save_hyperparameter(args)
+    ### create log
+    logger = loadLogger(args)
     ### load checkpoints if exist
     if args.resume:
         if os.path.isfile(args.resume):
@@ -79,15 +82,16 @@ def main():
         validate(val_loader, model, 0)
         return
     for epoch in range(args.start_epoch, args.epochs):
-        
+        logger.info(" Training epoch: {}".format(epoch+1))
         adjust_learning_rate(optimizer, epoch, args.lr_steps)
 
         # train for one epoch
-        train(train_loader, model, optimizer, epoch, device)
+        train(train_loader, model, optimizer, device, 200, logger)
 
         # evaluate on validation set
         if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
-            loss1 = validate(val_loader, model, device)
+            logger.info(" Eval epoch: {}".format(epoch + 1))
+            loss1 = validate(val_loader, model, device, 30, logger)
 
             # remember best prec@1 and save checkpoint
             is_best = loss1 < best_loss
@@ -99,14 +103,20 @@ def main():
             }, save_path, is_best)
         # train(train_loader, model, optimizer, epoch, device)
 
-def train(train_loader, model, optimizer, epoch, device):
+def train(train_loader, model, optimizer, device, batch_num=None, logger=None):
     # dataset_path = '/data1/lty/dataset/egopose_dataset/datasets'
     # config_path = '/data1/lty/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml'
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     end = time.time()
-    for i, (image, label, motion) in tqdm(enumerate(train_loader), total=len(train_loader)):
+
+    if batch_num==None:
+        max_iter = len(train_loader)
+    else:
+        max_iter = batch_num
+
+    for i, (image, label, motion) in tqdm(enumerate(train_loader), total=max_iter):
         data_time.update(time.time() - end)
         label = label.to(device)
         with torch.no_grad():
@@ -132,19 +142,30 @@ def train(train_loader, model, optimizer, epoch, device):
         end = time.time()
 
         if i % args.print_freq == 0:
-            print(('Epoch: [{0}][{1}/{2}], lr: {lr:.5f}\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
-                   epoch, i, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses, lr=optimizer.param_groups[-1]['lr'])))
+            logger.info(" \tBatch({:>3}/{:>3}) done. Loss: {:.4f}".format(i+1, max_iter, loss.data.item()))
+
+        if i > max_iter:
+            break
+        # if i % args.print_freq == 0:
+        #     print(('Epoch: [{0}][{1}/{2}], lr: {lr:.5f}\t'
+        #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+        #           'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+        #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
+        #            epoch, i, len(train_loader), batch_time=batch_time,
+        #            data_time=data_time, loss=losses, lr=optimizer.param_groups[-1]['lr'])))
 
 
-def validate(val_loader, model, device, logger=None):
+def validate(val_loader, model, device, batch_num=None, logger=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
     end = time.time()
-    for i, (image, label, motion) in tqdm(enumerate(val_loader), total=len(val_loader)):
+
+    if batch_num==None:
+        max_iter = len(val_loader)
+    else:
+        max_iter = batch_num
+
+    for i, (image, label, motion) in tqdm(enumerate(val_loader), total=max_iter):
         with torch.no_grad():
             label = label.to(device)
             foreground = build_foreground(image)
@@ -161,12 +182,15 @@ def validate(val_loader, model, device, logger=None):
             end = time.time()
 
         if i % args.print_freq == 0:
-            print(('Test: [{0}/{1}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
-                   i, len(val_loader), batch_time=batch_time, loss=losses)))
-        if i > 10:
+            logger.info(" \tBatch({:>3}/{:>3}) done. Loss:{:.4f}".format(i+1, max_iter, loss.data.item()))
+        
+        if i > max_iter:
             break
+        # if i % args.print_freq == 0:
+        #     print(('Test: [{0}/{1}]\t'
+        #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+        #           'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(
+        #            i, len(val_loader), batch_time=batch_time, loss=losses)))
 
     print(('Testing Results: Loss {loss.avg:.5f}'.format(loss=losses)))
 
@@ -222,6 +246,32 @@ def save_hyperparameter(args):
         for arg in sorted(vars(args)):
             attr = getattr(args, arg)
             file.write('{} = {}\n'.format(arg, attr))
+
+def loadLogger(args):
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter(fmt="[ %(asctime)s ] %(message)s",
+                                  datefmt="%a %b %d %H:%M:%S %Y")
+
+    sHandler = logging.StreamHandler()
+    sHandler.setFormatter(formatter)
+
+    logger.addHandler(sHandler)
+    path = os.getcwd()
+    basedir = os.path.join(path, 'logs', args.exp_name)
+    
+    work_dir = os.path.join(basedir,
+                            time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()))
+    if not os.path.exists(work_dir):
+        os.makedirs(work_dir)
+
+    fHandler = logging.FileHandler(work_dir + '/log.txt', mode='w')
+    fHandler.setLevel(logging.DEBUG)
+    fHandler.setFormatter(formatter)
+
+    logger.addHandler(fHandler)
+
+    return logger
 
 def build_motion_history(R, d, nframes=31):
         batch = R.shape[0]
