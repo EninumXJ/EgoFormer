@@ -165,3 +165,4 @@ class EgoNet(nn.Module):
         head1 = self.fc2(fusion_feature)
         head2 = self.fc3(fusion_feature)
         return keypoint, head1, head2
+
