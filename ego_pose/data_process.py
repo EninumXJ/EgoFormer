@@ -36,7 +36,7 @@ def load_joint_rotation(traj, index, idx):
         return get_rotation_matrix(joint_rotation[0], joint_rotation[1], joint_rotation[2])
 
 class MoCapDataset(Dataset):
-    def __init__(self, dataset_path, config_path, image_tmpl, image_transform=None, mocap_fr=30, test_mode=False):
+    def __init__(self, dataset_path, config_path, image_tmpl, image_transform=None, mocap_fr=30, L=20, test_mode=False):
         with open(config_path, 'r') as f:
             config = yaml.load(f.read(),Loader=yaml.FullLoader)
         self.dataset_path = dataset_path
@@ -51,7 +51,7 @@ class MoCapDataset(Dataset):
         self.mocap_fr = mocap_fr
         self.image_tmpl = image_tmpl
         self.transform = image_transform
-
+        self.length = L
         self.data_dict = []
         length = 0
         for i in range(len(self.data_sync)):
@@ -202,40 +202,46 @@ class MoCapDataset(Dataset):
         ind_frame_in_video = ind_frame_in_mocap + self.data_sync[ind][0]
         # print("ind_frame_in_video: ", ind_frame_in_video)
         # print("ind_frame_in_mocap: ", ind_frame_in_mocap)
-        if(ind_frame_in_video < 32):
-            print("index out of bounds")
-            return
+        
         dir = self.data_list[ind]
         image_dir = os.path.join(self.dataset_path, "fpv_frames", dir)
-        traj_file = dir + ".npy"
-        # traj_path = "data/" + traj_file
-        # bvh_file = dir + ".bvh"
-        # bvh_path = os.path.join(self.dataset_path, "traj", bvh_file)
-        # with open(bvh_path) as f:
-        #     mocap = Bvh(f.read())
-        # traj = np.load(traj_path)[:-1]
-        image = self._load_image(image_dir, ind_frame_in_video)
-        # rotation = self._load_rotation(traj, ind_frame_in_mocap)
-        # offset = self._load_offset(mocap)
-        keypoints_ = torch.from_numpy(np.load(os.path.join(self.dataset_path, "keypoints", dir + ".npy")))[ind_frame_in_mocap, :]
-        keypoints = keypoints_[6:].unsqueeze(0)
-        f = keypoints_[0:3].unsqueeze(0)
-        u = keypoints_[3:6].unsqueeze(0)
-        # keypoints = self._load_keypoint_positon(rotation, offset)
-        ### 将keypoints映射到[-1,1]之间
-        d_max = torch.max(keypoints, dim=1)[0]
-        d_min = torch.min(keypoints, dim=1)[0]
-        dst = d_max - d_min
-        keypoints = ((keypoints - d_min) / dst - 0.5) / 0.5      
-        # f, u = self._load_f_u(rotation, offset)
-        label = torch.cat([f, u, keypoints], dim=1)
-        # R, d = self._build_motion(offset, traj, ind_frame_in_mocap)
-        try:
-            motion = poseRecover(image_dir, ind_frame_in_video)
-        except:
-            motion = torch.zeros([1, 13, 31], dtype=torch.float)
-        finally:
-            return self.transform(image), label, motion
+        feature_path = os.path.join(self.dataset_path, "features", dir, "feature_10frames.npy")
+        feature = np.load(feature_path)
+        # print("feature shape: ", feature.shape)
+        L = self.length
+        # try:
+        #     motion = poseRecover_2(image_dir, ind_frame_in_video-i, max_frames=20)
+        # except:
+        #     motion = torch.zeros([1, 12, 20], dtype=torch.float)
+        # finally:
+        #     if i==L-1:
+        #         motion_batch = motion 
+        #     else:
+        #         motion_batch = torch.cat((motion_batch, motion), 0)
+        ### 这里的index +1是因为在提取特征时多提取了一个时刻，所以用来矫正误差
+       
+        if(ind_frame_in_video-L+2 < 0 or ind_frame_in_mocap-L+1 < 0):
+            motion = torch.zeros(L, 12*10)
+            label = torch.zeros(L, 51)
+        else:
+            motion_np = feature[ind_frame_in_video-L+2:ind_frame_in_video+2,:]
+            motion = torch.from_numpy(motion_np).type(torch.float32)
+            # print("motion shape: ", motion.shape)
+            keypoints_ = torch.from_numpy(np.load(os.path.join(self.dataset_path, "keypoints", dir + ".npy")))[ind_frame_in_mocap-L+1:ind_frame_in_mocap+1, :]
+            # print("keypoints_ shape: ", keypoints_.shape)
+            keypoints = keypoints_[:, 6:]
+            f = keypoints_[:, 0:3]
+            u = keypoints_[:, 3:6]
+            ### 将keypoints映射到[-1,1]之间
+            d_max = torch.max(keypoints, dim=1)[0].unsqueeze(1)
+            # d_max shape: (batch)->(batch, 1)
+            d_min = torch.min(keypoints, dim=1)[0].unsqueeze(1)
+            # print("d_min shape: ", d_min.shape)
+            dst = d_max - d_min
+            keypoints = ((keypoints - d_min) / dst - 0.5) / 0.5      
+            label = torch.cat([f, u, keypoints], dim=1)
+        # print("label shape: ", label.shape)
+        return motion.reshape(L, -1), label
 
     def __len__(self):
         len = 0 

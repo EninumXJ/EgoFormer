@@ -1,15 +1,20 @@
 #!/bin/bash
-DATA_DIR=/home/litianyi/dataset/egopose_dataset/datasets
-CONFIG_PATH=/home/litianyi/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml
-CUDA_VISIBLE_DEVICES=1,2,3 python train.py \
+DATA_DIR=/home/liumin/litianyi/workspace/data/datasets
+CONFIG_PATH=/home/liumin/litianyi/workspace/data/datasets/meta/meta_subject_01.yml
+CUDA_VISIBLE_DEVICES=0 python train.py \
     --dataset_path $DATA_DIR \
     --config_path $CONFIG_PATH \
-    --exp_name train02 \
-    --epochs 20 \
-    --lr 0.005 \
-    --batch_size 32 \
-    --snapshot_pref baseline_stage1 \
-    --gpus 0 1 2 \
+    --exp_name train04 \
+    --epochs 150 \
+    --lr 0.01 \
+    --batch_size 48 \
+    --snapshot_pref transformer \
+    --gpus 0  \
     --eval-freq=1 \
-    --clip-gradient=20 \
-    --resume logs/train01/baseline_stage1_model_best.pth.tar \
+    --clip-gradient=30 \
+    --L 30
+    --h 10
+    --dff 720
+    --N 8
+    --lr_steps 50 100
+    # --resume logs/train01/baseline_stage1_model_best.pth.tar \

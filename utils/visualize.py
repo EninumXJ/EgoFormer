@@ -60,10 +60,6 @@ def DrawSkeleton(keypoints, head1=None, head2=None, image_name='Skeleton.jpg'):
 
 # keypoints: ndarray [1, 51]
 def DrawSkeleton45(keypoints, head1=None, head2=None, image_name='Skeleton.jpg'):
-    # pos_x = keypoints[0:45:3]
-    # pos_y = keypoints[1:45:3]
-    # pos_z = keypoints[2:45:3]
-    # head = keypoints[6:9]
     pos_x = keypoints[0:len(keypoints):3]
     pos_y = keypoints[1:len(keypoints):3]
     pos_z = keypoints[2:len(keypoints):3]
@@ -73,7 +69,7 @@ def DrawSkeleton45(keypoints, head1=None, head2=None, image_name='Skeleton.jpg')
     yp = pos_y.T
     zp = pos_z.T
     ax = plt.axes(projection='3d')
-    if head1==None and head2==None:
+    if head1 is None and head2 is None:
         pass
     else:
         f = head1
@@ -119,6 +115,6 @@ if __name__=='__main__':
           0.1286,  0.5460,  0.0444,  0.1807, -0.0630,  0.0725,  0.0708, -0.1156,
          -0.4864,  0.0570, -0.1081, -1.0000, -0.0198,  0.0471,  0.0886, -0.0831,
          -0.0822, -0.4649, -0.0998, -0.1110, -0.9777]])
-
+    print(keypoint[0, :].shape)
     # DrawSkeleton(keypoint[0, 6:], keypoint[0, 0:3], keypoint[0, 3:6])
     DrawSkeleton45(keypoint[0, :])

@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from ego_pose.data_process import MoCapDataset
 from ego_pose.transforms import *
-from ego_pose.model import *
+from ego_pose.transformer import *
 from ego_pose.loss import *
 import shutil
 from opts import parser
@@ -20,7 +20,7 @@ def main():
     best_loss = 1e10
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = EgoNet()
+    model = EgoViT(N=args.N, d_model=120, d_ff=args.dff, pose_dim=51, h=args.h, dropout=args.dropout)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model, device_ids=args.gpus).cuda()
     else:
@@ -79,19 +79,19 @@ def main():
                                 weight_decay=args.weight_decay)
 
     if args.evaluate:
-        validate(val_loader, model, 0)
+        validate(val_loader, model, 0, args=args)
         return
     for epoch in range(args.start_epoch, args.epochs):
         logger.info(" Training epoch: {}".format(epoch+1))
         adjust_learning_rate(optimizer, epoch, args.lr_steps)
 
         # train for one epoch
-        train(train_loader, model, optimizer, device, 200, logger)
+        train(train_loader, model, optimizer, device, logger=logger, args=args)
 
         # evaluate on validation set
         if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
             logger.info(" Eval epoch: {}".format(epoch + 1))
-            loss1 = validate(val_loader, model, device, 30, logger)
+            loss1 = validate(val_loader, model, device, 30, logger, args)
 
             # remember best prec@1 and save checkpoint
             is_best = loss1 < best_loss
@@ -103,7 +103,7 @@ def main():
             }, save_path, is_best)
         # train(train_loader, model, optimizer, epoch, device)
 
-def train(train_loader, model, optimizer, device, batch_num=None, logger=None):
+def train(train_loader, model, optimizer, device, batch_num=None, logger=None, args=None):
     # dataset_path = '/data1/lty/dataset/egopose_dataset/datasets'
     # config_path = '/data1/lty/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml'
     batch_time = AverageMeter()
@@ -116,18 +116,25 @@ def train(train_loader, model, optimizer, device, batch_num=None, logger=None):
     else:
         max_iter = batch_num
 
-    for i, (image, label, motion) in tqdm(enumerate(train_loader), total=max_iter):
+    for i, (motion, label) in tqdm(enumerate(train_loader), total=len(train_loader)):
         data_time.update(time.time() - end)
         label = label.to(device)
-        with torch.no_grad():
-            foreground = build_foreground(image)
-        foreground = foreground.to(device)
-        motion_input = motion.to(device)
-        
-        keypoint, head1, head2 = model(foreground, motion_input)
-        
-        loss = ComputeLoss(keypoint, head1, head2, label)
-        losses.update(loss.item(), image.shape[0])
+        tgt = label
+        # print("tgt shape: ", tgt.shape)
+        src = motion.to(device)
+        # src shape:(batch,length,feature_dim)
+        src_mask = (src.sum(axis=-1) != 0).squeeze(-1).unsqueeze(-2)
+        # src_mask shape:(batch,1,length)
+        tgt_mask = (tgt.sum(axis=-1) != 0).squeeze(-1).unsqueeze(-2)
+        # tgt_mask shape:(batch,1,length)
+        mask_ = torch.tensor(subsequent_mask(tgt.size(-2)).type_as(tgt_mask.data))
+        # mask_ shape:(1,length,length)
+        tgt_mask = tgt_mask & mask_
+        # tgt_mask shape:(batch,length,length)
+        output = model(src, tgt, src_mask, tgt_mask)
+        # output shape:(batch,length,pose_dim)
+        loss = ComputeLoss(output, label, args.L)
+        losses.update(loss.item(), label.shape[0])
         optimizer.zero_grad()
         loss.backward()
         ### gradient clip: 用来限制过大的梯度
@@ -144,8 +151,8 @@ def train(train_loader, model, optimizer, device, batch_num=None, logger=None):
         if i % args.print_freq == 0:
             logger.info(" \tBatch({:>3}/{:>3}) done. Loss: {:.4f}".format(i+1, max_iter, loss.data.item()))
 
-        if i > max_iter:
-            break
+        # if i > max_iter:
+        #     break
         # if i % args.print_freq == 0:
         #     print(('Epoch: [{0}][{1}/{2}], lr: {lr:.5f}\t'
         #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -155,7 +162,7 @@ def train(train_loader, model, optimizer, device, batch_num=None, logger=None):
         #            data_time=data_time, loss=losses, lr=optimizer.param_groups[-1]['lr'])))
 
 
-def validate(val_loader, model, device, batch_num=None, logger=None):
+def validate(val_loader, model, device, batch_num=None, logger=None, args=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
     end = time.time()
@@ -165,17 +172,38 @@ def validate(val_loader, model, device, batch_num=None, logger=None):
     else:
         max_iter = batch_num
 
-    for i, (image, label, motion) in tqdm(enumerate(val_loader), total=max_iter):
+    for i, (motion, label) in tqdm(enumerate(val_loader), total=max_iter):
         with torch.no_grad():
             label = label.to(device)
-            foreground = build_foreground(image)
-            # motion_input = build_motion_history(R, d)
-            foreground = foreground.to(device)
-            motion_input = motion.to(device)
-            keypoint, head1, head2 = model(foreground, motion_input)
+            tgt = label
+            src = motion.to(device)
+            # src shape:(batch,length,feature_dim)
+            src_mask = (src.sum(axis=-1) != 0).squeeze(-1).unsqueeze(-2)
+            # src_mask shape:(batch,1,length)
+            tgt_mask = (tgt.sum(axis=-1) != 0).squeeze(-1).unsqueeze(-2)
+            # tgt_mask shape:(batch,1,length)
+            mask_ = torch.tensor(subsequent_mask(tgt.size(-2)).type_as(tgt_mask.data))
+            # mask_ shape:(1,length,length)
+            tgt_mask = tgt_mask & mask_
+            # tgt_mask shape:(batch,length,length)
+            output = model(src, tgt, src_mask, tgt_mask)
+            # output shape:(batch,length,pose_dim)label = label.to(device)
+            tgt = label
+            src = motion.to(device)
+            # src shape:(batch,length,feature_dim)
+            src_mask = (src.sum(axis=-1) != 0).squeeze(-1).unsqueeze(-2)
+            # src_mask shape:(batch,1,length)
+            tgt_mask = (tgt.sum(axis=-1) != 0).squeeze(-1).unsqueeze(-2)
+            # tgt_mask shape:(batch,1,length)
+            mask_ = torch.tensor(subsequent_mask(tgt.size(-2)).type_as(tgt_mask.data))
+            # mask_ shape:(1,length,length)
+            tgt_mask = tgt_mask & mask_
+            # tgt_mask shape:(batch,length,length)
+            output = model(src, tgt, src_mask, tgt_mask)
+            # output shape:(batch,length,pose_dim)
             
-            loss = ComputeLoss(keypoint, head1, head2, label)
-            losses.update(loss.item(), image.shape[0])
+            loss = ComputeLoss(output, label, args.L)
+            losses.update(loss.item(), label.shape[0])
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -273,35 +301,6 @@ def loadLogger(args):
 
     return logger
 
-def build_motion_history(R, d, nframes=31):
-        batch = R.shape[0]
-        R_t = R
-        d_t = d
-        #R_t = R.reshape(-1,3,3)  # b,31,3,3 -> b*31,3,3
-        #d_t = d.reshape(-1,1,3)  # b,31,1,3 -> b*31,1,3
-        R_hat = (R_t - torch.eye(3)).reshape(-1,nframes,1,9)  # flatten: b,31,3,3->b,31,1,9 
-        d_hat = d_t / 1.8  # 1.8 is the estimated height 这里是随便指定的
-        g_hat = 1
-        d_hat *= 15 
-        g_hat = torch.tensor([0.3*(g_hat - 0.5)]).expand(batch, nframes, 1, 1)
-     
-        motion_input = torch.cat([R_hat, d_hat, g_hat], dim=-1).permute(0,2,3,1)  # (b,31,1,13).permute(0,2,3,1)
-        # print(motion_input.shape)
-        return motion_input
-
-def build_foreground(img):
-        # img shape: b,3,256,256
-        batch = img.shape[0]
-        img_h = img.shape[2]
-        img_w = img.shape[3]
-        x_ = torch.linspace(0., 1., img_h)
-        y_ = torch.linspace(0., 1., img_w)
-        x_cord, y_cord = torch.meshgrid(x_, y_)
-        x = x_cord.reshape(1, 1, img_h, img_w).expand(batch, 1, img_h, img_w)
-        y = y_cord.reshape(1, 1, img_h, img_w).expand(batch, 1, img_h, img_w)
-        
-        foreground = torch.cat([img, x, y], dim=1) # b,3,256,256 -> b,5,256,256  
-        return foreground
 
 if __name__ == '__main__': 
     main()

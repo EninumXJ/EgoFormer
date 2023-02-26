@@ -9,6 +9,11 @@ parser.add_argument('--dropout', '--do', default=0.5, type=float,
                     metavar='DO', help='dropout ratio (default: 0.5)')
 parser.add_argument('--loss_type', type=str, default="nll",
                     choices=['nll'])
+parser.add_argument('--N', type=int, default=6, help='number of transformer sublayers')
+parser.add_argument('--L', type=int, default=20, help='length of input')
+parser.add_argument('--h', type=int, default=5, help='num of head')
+parser.add_argument('--dff', type=int, default=720, help='num of hidden neurons in SA')
+
 
 # ========================= Learning Configs ==========================
 parser.add_argument('--epochs', default=45, type=int, metavar='N',

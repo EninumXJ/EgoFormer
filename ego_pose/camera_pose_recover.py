@@ -45,14 +45,14 @@ def matchKeypoints(kpsA, kpsB, featuresA, featuresB, camera_matrix, ratio=0.75, 
         return None
 
 # max_frames代表取得的连续视频帧数 默认为30
-def poseRecover(image_path, frame_in_video, max_frames=30):
+def poseRecover_1(image_path, frame_in_video, max_frames=30):
     transform = []
-    img_path1 = image_path + "/%05d"%(frame_in_video-max_frames-1) + ".png"
+    img_path1 = image_path + "/%05d"%(frame_in_video-max_frames) + ".png"
     imageA = cv2.imread(img_path1)
     kps1, feature1 = detectAndDescribe(imageA)
     if(feature1 is not None):
             feature1 = feature1.astype(np.float32)
-    for i in range(frame_in_video-max_frames, frame_in_video+1):
+    for i in range(frame_in_video-max_frames+1, frame_in_video+1):
         img_path2 = image_path + "/%05d"%(i) + ".png"
         # print("img_path2:", img_path2)
         # imageA = cv2.imread(img_path1)
@@ -83,9 +83,62 @@ def poseRecover(image_path, frame_in_video, max_frames=30):
         else:
             R = np.zeros((1, 9))
             t = np.zeros((1, 3))
-        g_hat = np.zeros((1, 1))
-        g_hat[0, 0] = 0.3*(1-0.5)
-        transform_ = np.concatenate((R, t, g_hat), axis=1)
+        # g_hat = np.zeros((1, 1))
+        # g_hat[0, 0] = 0.3*(1-0.5)
+        # transform_ = np.concatenate((R, t, g_hat), axis=1)
+        transform_ = np.concatenate((R, t), axis=1)
+        transform.append(transform_)
+    transform = np.array(transform)
+    transform = torch.from_numpy(transform).permute(1,2,0).float()
+    return transform
+    # print("transform shape:", transform.shape)
+
+# max_frames代表取得的连续视频帧数 默认为30
+def poseRecover_2(image_path, frame_in_video, max_frames=30):
+    transform = []
+    # img_path1 = image_path + "/%05d"%(frame_in_video-max_frames-1) + ".png"
+    # imageA = cv2.imread(img_path1)
+    # kps1, feature1 = detectAndDescribe(imageA)
+    # if(feature1 is not None):
+    #         feature1 = feature1.astype(np.float32)
+    for i in range(frame_in_video-max_frames+1, frame_in_video+1):
+        img_path1 = image_path + "/%05d"%(i-1) + ".png"
+        imageA = cv2.imread(img_path1)
+        img_path2 = image_path + "/%05d"%(i) + ".png"
+        imageB = cv2.imread(img_path2)
+        W = imageA.shape[1]
+        kps1, feature1 = detectAndDescribe(imageA)
+        kps2, feature2 = detectAndDescribe(imageB)
+        if(feature1 is not None):
+            feature1 = feature1.astype(np.float32)
+        if(feature2 is not None):
+            feature2 = feature2.astype(np.float32)
+        # f = FocalLength /(sensorsize / Width）
+        ### 这里的相机内参都是我们假设的
+        cx = 36
+        cy = 24
+        fx = 20.78 / (cx / W)
+        fy = 20.78 / (cy / W)
+        camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+        if(matchKeypoints(kps1, kps2, feature1, feature2, camera_matrix) != None):
+            (E, ptsA, ptsB) = matchKeypoints(kps1, kps2, feature1, feature2, camera_matrix)
+            # E, mask = cv2.findEssentialMat(ptsB, ptsA, focal, pp, cv2.RANSAC, 0.999, 1.0)
+            T = cv2.recoverPose(E, ptsA, ptsB, camera_matrix)
+            # _, R, t, _ = cv2.recoverPose(E, ptsB, ptsA, focal=focal, pp=pp, mask=mask)
+            #print("T: ", T)
+            R = T[1]  ### rotation
+            R = R.reshape(1, 9)
+            # print(R.shape)
+            t = T[2]  ### translation
+            t = t.T
+            # print(t.shape)
+        else:
+            R = np.zeros((1, 9))
+            t = np.zeros((1, 3))
+        # g_hat = np.zeros((1, 1))
+        # g_hat[0, 0] = 0.3*(1-0.5)
+        # transform_ = np.concatenate((R, t, g_hat), axis=1)
+        transform_ = np.concatenate((R, t), axis=1)*100
         transform.append(transform_)
     transform = np.array(transform)
     transform = torch.from_numpy(transform).permute(1,2,0).float()
@@ -93,9 +146,61 @@ def poseRecover(image_path, frame_in_video, max_frames=30):
     # print("transform shape:", transform.shape)
 
 if __name__=='__main__':
-    image_path = '/data1/lty/dataset/egopose_dataset/datasets/fpv_frames/0213_take_01/'
-    frame_in_video = 50
-    transform = poseRecover(image_path, frame_in_video)
-    print(transform.shape)
-    null = torch.zeros([1, 13, 31], dtype=torch.float)
-    print(null)
+    # image_path = '/home/liumin/litianyi/workspace/data/datasets/fpv_frames/0213_take_01/'
+    # frame_in_video = 50
+    # L = 15
+    # for i in reversed(range(L)):
+    #     try:
+    #         motion = poseRecover_1(image_path, frame_in_video-i, max_frames=15)
+    #     except:
+    #         motion = torch.zeros([1, 12, 15], dtype=torch.float)
+    #     finally:
+    #         if i==L-1:
+    #             motion_batch = motion 
+    #         else:
+    #             motion_batch = torch.cat((motion_batch, motion), 0)
+    # print(motion_batch.shape)
+    import os
+    import yaml
+    fpv_path = "/home/liumin/litianyi/workspace/data/datasets/fpv_frames/"
+    meta_path = "/home/liumin/litianyi/workspace/data/datasets/meta/meta_cross_01.yml"
+    with open(meta_path, 'r') as f:
+        config = yaml.load(f.read(),Loader=yaml.FullLoader)
+    train_list = config['train']
+    config_path = "/home/liumin/litianyi/workspace/data/datasets/image_num.yml"
+    with open(config_path, 'r') as f:
+        num_config = yaml.load(f.read(),Loader=yaml.FullLoader)
+    dir_image_num = num_config["image_number"]
+    print(dir_image_num)
+    dirlist = os.listdir(fpv_path)
+    
+    for i in dirlist:
+        if(i[0] == 'r'):
+            continue
+        transform = torch.zeros([1, 12, 10])
+        image_dir = os.path.join(fpv_path, i)
+        print(image_dir)
+        ## 创建文件夹
+        feature_path = "/home/liumin/litianyi/workspace/data/datasets/features"
+        feature_path = os.path.join(feature_path, i)
+        print("feature path: ", feature_path)
+        if  not os.path.exists(feature_path):
+            os.makedirs(feature_path)
+        max_num = dir_image_num[i]
+        for i in range(max_num):
+            # 取第i帧与第i-10帧之间的连续变换参数
+            if i < 10:
+                motion = torch.zeros([1, 12, 10])
+                transform = torch.cat([transform, motion], dim=0)
+            else:
+                try:
+                    motion = poseRecover_1(image_dir, i, max_frames=10)
+                except:
+                    motion = torch.zeros([1, 12, 10])
+                finally:
+                    transform = torch.cat([transform, motion], dim=0)
+        features = transform.numpy()
+        print("features shape: ", features.shape)
+        save_path = os.path.join(feature_path, "feature_10frames.npy")
+        print("save_path: ", save_path)
+        np.save(save_path, features)

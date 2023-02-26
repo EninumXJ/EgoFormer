@@ -1,20 +1,23 @@
 import torch 
 import torch.nn as nn
-import torch.functional as F
+import torch.nn.functional as F
 import math
 import copy
 import numpy as np
 
+
 def attention(query, key, value, mask=None, dropout=None):
-	d_k = query.size(-1)
-	scores = torch.matmul(query, key.transpose(-2, -1)) \
-		/ math.sqrt(d_k)
-	if mask is not None:
-		scores = scores.masked_fill(mask == 0, -1e9)
-	p_attn = F.softmax(scores, dim = -1)
-	if dropout is not None:
-		p_attn = dropout(p_attn)
-	return torch.matmul(p_attn, value), p_attn
+    d_k = query.size(-1)
+    scores = torch.matmul(query, key.transpose(-2, -1)) \
+        / math.sqrt(d_k)
+    # scores: (batch, h, length, length)
+    # mask shape: (batch, 1, 1, length)
+    if mask is not None:
+        scores = scores.masked_fill(mask == 0, -1e9)
+    p_attn = F.softmax(scores, dim = -1)
+    if dropout is not None:
+        p_attn = dropout(p_attn)
+    return torch.matmul(p_attn, value), p_attn
 
 def clones(module, N):
 	# 克隆N个完全相同的SubLayer，使用了copy.deepcopy
@@ -27,34 +30,37 @@ def subsequent_mask(size):
 	return torch.from_numpy(subsequent_mask) == 0
 
 class EncoderDecoder(nn.Module):
-	"""
-	标准的Encoder-Decoder架构。这是很多模型的基础
-	"""
-	def __init__(self, encoder, decoder, src_embed, tgt_embed, generator):
-		super(EncoderDecoder, self).__init__()
-		# encoder和decoder都是构造的时候传入的，这样会非常灵活
-		self.encoder = encoder
-		self.decoder = decoder
-		# 源语言和目标语言的embedding
-		self.src_embed = src_embed
-		self.tgt_embed = tgt_embed
-		# generator后面会讲到，就是根据Decoder的隐状态输出当前时刻的词
-		# 基本的实现就是隐状态输入一个全连接层，全连接层的输出大小是词的个数
-		# 然后接一个softmax变成概率。
-		self.generator = generator
-	
-	def forward(self, src, tgt, src_mask, tgt_mask):
-		# 首先调用encode方法对输入进行编码，然后调用decode方法解码
-		return self.decode(self.encode(src, src_mask), src_mask,
-			tgt, tgt_mask)
-	
-	def encode(self, src, src_mask):
-		# 调用encoder来进行编码，传入的参数embedding的src和src_mask
-		return self.encoder(self.src_embed(src), src_mask)
-	
-	def decode(self, memory, src_mask, tgt, tgt_mask):
-		# 调用decoder
-		return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
+    """
+    标准的Encoder-Decoder架构。这是很多模型的基础
+    """
+    def __init__(self, encoder, decoder, src_embed, tgt_embed, generator):
+        super(EncoderDecoder, self).__init__()
+        # encoder和decoder都是构造的时候传入的，这样会非常灵活
+        self.encoder = encoder
+        self.decoder = decoder
+        # 源语言和目标语言的embedding
+        self.src_embed = src_embed
+        self.tgt_embed = tgt_embed
+        # generator后面会讲到，就是根据Decoder的隐状态输出当前时刻的词
+        # 基本的实现就是隐状态输入一个全连接层，全连接层的输出大小是词的个数
+        # 然后接一个softmax变成概率。
+        self.generator = generator
+
+    def forward(self, src, tgt, src_mask, tgt_mask):
+        # 首先调用encode方法对输入进行编码，然后调用decode方法解码
+        # print("encode output shape: ", self.encode(src, src_mask).shape)
+        # print("tgt shape: ", tgt.shape)
+        # print("tgt_mask: ", tgt_mask.shape)
+        return self.generator(self.decode(self.encode(src, src_mask), src_mask,
+            tgt, tgt_mask))
+
+    def encode(self, src, src_mask):
+        # 调用encoder来进行编码，传入的参数embedding的src和src_mask
+        return self.encoder(self.src_embed(src), src_mask)
+
+    def decode(self, memory, src_mask, tgt, tgt_mask):
+        # 调用decoder
+        return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
 	
 
 class Generator(nn.Module):
@@ -66,7 +72,7 @@ class Generator(nn.Module):
 	
 	# 全连接再加上一个tanh
 	def forward(self, x):
-		return F.tanh(self.proj(x), dim=-1)
+		return F.tanh(self.proj(x))
 	
 class LayerNorm(nn.Module):
 	def __init__(self, features, eps=1e-6):
@@ -165,14 +171,17 @@ class MultiHeadedAttention(nn.Module):
 	def forward(self, query, key, value, mask=None): 
 		if mask is not None:
 			# 所有h个head的mask都是相同的 
+            # (batch, 1, 1, length, feature_dim) ？
 			mask = mask.unsqueeze(1)
 		nbatches = query.size(0)
 		
-		# 1) 首先使用线性变换，然后把d_model分配给h个Head，每个head为d_k=d_model/h 
+		# 1) 首先使用线性变换，然后把d_model分配给h个Head，每个head为d_k=d_model/h : 240/5
 		query, key, value = \
 			[l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)	
 				for l, x in zip(self.linears, (query, key, value))]
 		
+        # src->query: (batch, length, feature_dim=240)->(batch, length, 5, 48)->(batch, 5, length, 48)
+        # src_mask: (batch, length, feature_dim)
 		# 2) 使用attention函数计算
 		x, self.attn = attention(query, key, value, mask=mask, 
 			dropout=self.dropout)
@@ -211,8 +220,16 @@ class PositionwiseFeedForward(nn.Module):
 	def forward(self, x):
 		return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
+class Embeddings(nn.Module):
+	def __init__(self, d_model, pose_dim):
+		super(Embeddings, self).__init__()
+		self.lut = nn.Linear(pose_dim, d_model)
+		self.d_model = d_model
+	
+	def forward(self, x):
+		return F.tanh(self.lut(x))
 
-### make_model:创造一个可用的transformer模型
+### EgoViT:模型主要代码
 # 参数：
 #   src:源数据-这里是从某一个视频帧中提取的特征
 #   target:人体pose数据
@@ -221,23 +238,35 @@ class PositionwiseFeedForward(nn.Module):
 #   d_ff:全连接层中间隐神经元的个数
 #   h:transformer模型使用到的head数量
 #   dropout:    
-def make_model(src, target, N=6, d_model=512, d_ff=2048, pose_dim=31, h=8, dropout=0.1):
-	c = copy.deepcopy
-	attn = MultiHeadedAttention(h, d_model)
-	ff = PositionwiseFeedForward(d_model, d_ff, dropout)
-	position = PositionalEncoding(d_model, dropout)
-	model = EncoderDecoder(
-		Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
-		Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
-		nn.Sequential(c(position)),
-		nn.Sequential(c(position)),
-		Generator(d_model, pose_dim))
+class EgoViT(nn.Module):
+    def __init__(self, N=6, d_model=512, d_ff=2048, pose_dim=51, h=8, dropout=0.1):
+        super(EgoViT, self).__init__()
+        self.num_sublayer = N
+        self.d_model = d_model
+        self.d_ff = d_ff
+        self.pose_dim = pose_dim
+        self.head = h
+        self.dropout = dropout
 	
-	# 随机初始化参数，这非常重要
-	for p in model.parameters():
-		if p.dim() > 1:
-			nn.init.xavier_uniform(p)
-	return model
+        c = copy.deepcopy
+        attn = MultiHeadedAttention(h, d_model)
+        ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+        position = PositionalEncoding(d_model, dropout)
+        self.model = EncoderDecoder(
+                    Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
+                    Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
+                    nn.Sequential(c(position)),
+                    nn.Sequential(Embeddings(d_model, pose_dim), c(position)),  ### decoder Embedding：embedding 51-dim to 240-dim
+                    Generator(d_model, pose_dim))
+    
+        # 随机初始化参数，这非常重要
+        for p in self.model.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform(p)
+			
+    def forward(self, src, tgt, src_mask, tgt_mask):
+	    return self.model.forward(src, tgt, src_mask, tgt_mask)
+
 
 class Batch: 
 	def __init__(self, src, trg=None, pad=0):
@@ -248,7 +277,7 @@ class Batch:
 			self.trg_y = trg[:, 1:]
 			self.trg_mask = \
 				self.make_std_mask(self.trg, pad)
-			self.ntokens = (self.trg_y != pad).data.sum()
+			# self.ntokens = (self.trg_y != pad).data.sum()
 	
 	@staticmethod
 	def make_std_mask(tgt, pad):
@@ -267,4 +296,4 @@ if __name__=='__main__':
 		                [[0.3, 0.6, 0.2], [0.2, 0.2, 0.2], [0.6, 0.9, 0.3], [0.1, 0.2, 0.3]]])
 
     batch = Batch(src, tgt, pad=0)
-    print("trg_mask: ", batch.trg_mask)
+    # print("trg_mask: ", batch.trg_mask)
