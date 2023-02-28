@@ -210,6 +210,13 @@ class PositionalEncoding(nn.Module):
 		x = x + torch.tensor(self.pe[:, :x.size(1)], requires_grad=False)
 		return self.dropout(x)
 
+class StraightForward(nn.Module): 
+	def __init__(self):
+		super(StraightForward, self).__init__()
+
+	def forward(self, x):
+		return x
+
 class PositionwiseFeedForward(nn.Module): 
 	def __init__(self, d_model, d_ff, dropout=0.1):
 		super(PositionwiseFeedForward, self).__init__()
@@ -239,33 +246,34 @@ class Embeddings(nn.Module):
 #   h:transformer模型使用到的head数量
 #   dropout:    
 class EgoViT(nn.Module):
-    def __init__(self, N=6, d_model=512, d_ff=2048, pose_dim=51, h=8, dropout=0.1):
-        super(EgoViT, self).__init__()
-        self.num_sublayer = N
-        self.d_model = d_model
-        self.d_ff = d_ff
-        self.pose_dim = pose_dim
-        self.head = h
-        self.dropout = dropout
-	
-        c = copy.deepcopy
-        attn = MultiHeadedAttention(h, d_model)
-        ff = PositionwiseFeedForward(d_model, d_ff, dropout)
-        position = PositionalEncoding(d_model, dropout)
-        self.model = EncoderDecoder(
-                    Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
-                    Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
-                    nn.Sequential(c(position)),
-                    nn.Sequential(Embeddings(d_model, pose_dim), c(position)),  ### decoder Embedding：embedding 51-dim to 240-dim
-                    Generator(d_model, pose_dim))
-    
-        # 随机初始化参数，这非常重要
-        for p in self.model.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform(p)
+	def __init__(self, N=6, d_model=512, d_ff=2048, pose_dim=51, h=8, dropout=0.1):
+		super(EgoViT, self).__init__()
+		self.num_sublayer = N
+		self.d_model = d_model
+		self.d_ff = d_ff
+		self.pose_dim = pose_dim
+		self.head = h
+		self.dropout = dropout
+
+		c = copy.deepcopy
+		attn = MultiHeadedAttention(h, d_model)
+		ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+		# position = PositionalEncoding(d_model, dropout)
+		position = StraightForward()
+		self.model = EncoderDecoder(
+					Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
+					Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
+					nn.Sequential(c(position)),
+					nn.Sequential(Embeddings(d_model, pose_dim), c(position)),  ### decoder Embedding：embedding 51-dim to 240-dim
+					Generator(d_model, pose_dim))
+
+		# 随机初始化参数，这非常重要
+		# for p in self.model.parameters():
+		# 	if p.dim() > 1:
+		# 		nn.init.xavier_uniform(p)
 			
-    def forward(self, src, tgt, src_mask, tgt_mask):
-	    return self.model.forward(src, tgt, src_mask, tgt_mask)
+	def forward(self, src, tgt, src_mask, tgt_mask):
+		return self.model.forward(src, tgt, src_mask, tgt_mask)
 
 
 class Batch: 

@@ -42,6 +42,37 @@ def ComputeLoss(keypoints, label, L=15):
     # print("loss_s: ", loss_s.shape)
     return (loss_s + loss_d + loss_o)/L
 
+def ComputeLoss_nohead(keypoints, label, L=15):
+    # label = label.squeeze()
+    keypoints_g = label
+    loss_d = torch.sum(torch.abs(keypoints - keypoints_g))
+    # print("loss_d: ", loss_d.shape)
+    # print("loss_o: ", loss_o.shape)
+    RightShoulder = keypoints[..., 3:6]
+    RightArm = keypoints[..., 6:9]
+    RightHand = keypoints[..., 9:12]
+    LeftShoulder = keypoints[..., 12:15]
+    LeftArm = keypoints[..., 15:18]
+    LeftHand = keypoints[..., 18:21]
+    RightUpLeg = keypoints[..., 21:24]
+    RightLeg = keypoints[..., 24:27]
+    RightFoot = keypoints[..., 27:30]
+    LeftUpLeg = keypoints[..., 30:33] 
+    LeftLeg = keypoints[..., 33:36]
+    LeftFoot = keypoints[..., 36:39]
+    RightBone1 = BoneLength(RightShoulder, RightArm)
+    RightBone2 = BoneLength(RightArm, RightHand)
+    RightBone3 = BoneLength(RightUpLeg, RightLeg)
+    RightBone4 = BoneLength(RightLeg, RightFoot)
+    LeftBone1 = BoneLength(LeftShoulder, LeftArm)
+    LeftBone2 = BoneLength(LeftArm, LeftHand)
+    LeftBone3 = BoneLength(LeftUpLeg, LeftLeg)
+    LeftBone4 = BoneLength(LeftLeg, LeftFoot)
+    loss_s = torch.abs(RightBone1-LeftBone1) + torch.abs(RightBone2-LeftBone2) + \
+             torch.abs(RightBone3-LeftBone3) + torch.abs(RightBone4-LeftBone4)
+    # print("loss_s: ", loss_s.shape)
+    return (loss_s + loss_d)/L
+
 if __name__=='__main__':
     label = torch.Tensor([[-2.3714e-02, -7.5240e-01,  4.2565e+00, -2.3714e-02, -4.2565e+00,
                 -7.5240e-01,  0.0000e+00,  0.0000e+00,  0.0000e+00,  3.0252e-02,

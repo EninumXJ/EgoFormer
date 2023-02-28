@@ -13,6 +13,15 @@ import os
 import time
 from tqdm import tqdm
 import logging
+import random
+from torch.optim.lr_scheduler import LambdaLR
+
+def setup_seed(seed):
+     torch.manual_seed(seed)
+     torch.cuda.manual_seed_all(seed)
+     np.random.seed(seed)
+     random.seed(seed)
+     torch.backends.cudnn.deterministic = True
 
 def main():
     global args, best_loss
@@ -20,7 +29,7 @@ def main():
     best_loss = 1e10
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = EgoViT(N=args.N, d_model=120, d_ff=args.dff, pose_dim=51, h=args.h, dropout=args.dropout)
+    model = EgoViT(N=args.N, d_model=120, d_ff=args.dff, pose_dim=45, h=args.h, dropout=args.dropout)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model, device_ids=args.gpus).cuda()
     else:
@@ -55,7 +64,9 @@ def main():
                                         GroupNormalize(
                                             mean=[.485, .456, .406],
                                             std=[.229, .224, .225])
-                                        ]), test_mode=False)
+                                        ]), 
+                               L=args.L,
+                               test_mode=False)
 
     val_data = MoCapDataset(dataset_path=args.dataset_path, 
                               config_path=args.config_path, 
@@ -66,32 +77,45 @@ def main():
                                         GroupNormalize(
                                             mean=[.485, .456, .406],
                                             std=[.229, .224, .225])
-                                        ]), test_mode=True)
+                                        ]), 
+                              L=args.L,
+                              test_mode=False)
 
     train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, 
                               shuffle=True,num_workers=args.workers, pin_memory=True)
     val_loader = DataLoader(dataset=val_data, batch_size=args.batch_size, 
                             shuffle=False, num_workers=args.workers, pin_memory=True)
     
-    optimizer = torch.optim.SGD(model.parameters(),
-                                lr=args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
+    if(args.optimizer=='SGD'):
+        optimizer = torch.optim.SGD(model.parameters(),
+                                    lr=args.lr,
+                                    momentum=args.momentum,
+                                    weight_decay=args.weight_decay)
+    if(args.optimizer=='Adam'):
+        opt = [120, 10, 4000]
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=args.lr, betas=(0.9, 0.98), eps=1e-9
+            )
+        lr_scheduler = LambdaLR(
+            optimizer=optimizer, lr_lambda=lambda step: rate(step, *opt)
+        )
 
     if args.evaluate:
         validate(val_loader, model, 0, args=args)
         return
+    
     for epoch in range(args.start_epoch, args.epochs):
         logger.info(" Training epoch: {}".format(epoch+1))
-        adjust_learning_rate(optimizer, epoch, args.lr_steps)
+        if(args.optimizer=='SGD'):
+            adjust_learning_rate(optimizer, epoch, args.lr_steps)
 
         # train for one epoch
-        train(train_loader, model, optimizer, device, logger=logger, args=args)
+        train(train_loader, model, optimizer, lr_scheduler, device, logger=logger, args=args)
 
         # evaluate on validation set
         if (epoch + 1) % args.eval_freq == 0 or epoch == args.epochs - 1:
             logger.info(" Eval epoch: {}".format(epoch + 1))
-            loss1 = validate(val_loader, model, device, 30, logger, args)
+            loss1 = validate(val_loader, model, device, 100, logger, args)
 
             # remember best prec@1 and save checkpoint
             is_best = loss1 < best_loss
@@ -103,9 +127,7 @@ def main():
             }, save_path, is_best)
         # train(train_loader, model, optimizer, epoch, device)
 
-def train(train_loader, model, optimizer, device, batch_num=None, logger=None, args=None):
-    # dataset_path = '/data1/lty/dataset/egopose_dataset/datasets'
-    # config_path = '/data1/lty/dataset/egopose_dataset/datasets/meta/meta_subject_01.yml'
+def train(train_loader, model, optimizer, scheduler, device, batch_num=None, logger=None, args=None):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -116,6 +138,7 @@ def train(train_loader, model, optimizer, device, batch_num=None, logger=None, a
     else:
         max_iter = batch_num
 
+    model.train()
     for i, (motion, label) in tqdm(enumerate(train_loader), total=len(train_loader)):
         data_time.update(time.time() - end)
         label = label.to(device)
@@ -135,7 +158,7 @@ def train(train_loader, model, optimizer, device, batch_num=None, logger=None, a
         # output shape:(batch,length,pose_dim)
         loss = ComputeLoss(output, label, args.L)
         losses.update(loss.item(), label.shape[0])
-        optimizer.zero_grad()
+        # optimizer.zero_grad()
         loss.backward()
         ### gradient clip: 用来限制过大的梯度
         if args.clip_gradient is not None:
@@ -143,13 +166,16 @@ def train(train_loader, model, optimizer, device, batch_num=None, logger=None, a
             # if total_norm > args.clip_gradient:
             #     print("clipping gradient: {} with coef {}".format(total_norm, args.clip_gradient / total_norm))
 
+        
         optimizer.step()
+        scheduler.step()
+        optimizer.zero_grad()
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
         if i % args.print_freq == 0:
-            logger.info(" \tBatch({:>3}/{:>3}) done. Loss: {:.4f}".format(i+1, max_iter, loss.data.item()))
+            logger.info("lr: {:.5f} \tBatch({:>3}/{:>3}) done. Loss: {:.4f}".format(optimizer.param_groups[0]['lr'], i+1, max_iter, loss.data.item()))
 
         # if i > max_iter:
         #     break
@@ -301,6 +327,17 @@ def loadLogger(args):
 
     return logger
 
+def rate(step, model_size, factor, warmup):
+    """
+    we have to default the step to 1 for LambdaLR function
+    to avoid zero raising to negative power.
+    """
+    if step == 0:
+        step = 1
+    return factor * (
+        model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5))
+    )
 
 if __name__ == '__main__': 
+    setup_seed(42)
     main()

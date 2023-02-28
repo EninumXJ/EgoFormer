@@ -222,7 +222,8 @@ class MoCapDataset(Dataset):
        
         if(ind_frame_in_video-L+2 < 0 or ind_frame_in_mocap-L+1 < 0):
             motion = torch.zeros(L, 12*10)
-            label = torch.zeros(L, 51)
+            # label = torch.zeros(L, 51)
+            label = torch.zeros(L, 45)
         else:
             motion_np = feature[ind_frame_in_video-L+2:ind_frame_in_video+2,:]
             motion = torch.from_numpy(motion_np).type(torch.float32)
@@ -239,7 +240,8 @@ class MoCapDataset(Dataset):
             # print("d_min shape: ", d_min.shape)
             dst = d_max - d_min
             keypoints = ((keypoints - d_min) / dst - 0.5) / 0.5      
-            label = torch.cat([f, u, keypoints], dim=1)
+            # label = torch.cat([f, u, keypoints], dim=1)
+            label = keypoints
         # print("label shape: ", label.shape)
         return motion.reshape(L, -1), label
 

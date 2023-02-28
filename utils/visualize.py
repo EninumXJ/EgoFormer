@@ -69,7 +69,7 @@ def DrawSkeleton45(keypoints, head1=None, head2=None, image_name='Skeleton.jpg')
     yp = pos_y.T
     zp = pos_z.T
     ax = plt.axes(projection='3d')
-    if head1 is None and head2 is None:
+    if head1 == None and head2 == None:
         pass
     else:
         f = head1
