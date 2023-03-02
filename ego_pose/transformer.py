@@ -70,9 +70,12 @@ class Generator(nn.Module):
 		super(Generator, self).__init__()
 		self.proj = nn.Linear(d_model, pose_dim)
 	
-	# 全连接再加上一个tanh
+	# 全连接再加上一个rescale操作
 	def forward(self, x):
-		return F.tanh(self.proj(x))
+		state = self.proj(x)
+		x_min = torch.min(state, dim=-1)[0].unsqueeze(-1)
+		x_max = torch.max(state, dim=-1)[0].unsqueeze(-1)
+		return ((state-x_min)/(x_max-x_min)-0.5)/0.5
 	
 class LayerNorm(nn.Module):
 	def __init__(self, features, eps=1e-6):
@@ -207,7 +210,9 @@ class PositionalEncoding(nn.Module):
 		self.register_buffer('pe', pe)
 
 	def forward(self, x):
-		x = x + torch.tensor(self.pe[:, :x.size(1)], requires_grad=False)
+		# x = x + torch.tensor(self.pe[:, :x.size(1)], requires_grad=False)
+		# 修改了位置编码的权重大小
+		x = 10 * x + 0.1 * torch.tensor(self.pe[:, :x.size(1)], requires_grad=False)
 		return self.dropout(x)
 
 class StraightForward(nn.Module): 
@@ -234,7 +239,7 @@ class Embeddings(nn.Module):
 		self.d_model = d_model
 	
 	def forward(self, x):
-		return F.tanh(self.lut(x))
+		return F.relu(self.lut(x))
 
 ### EgoViT:模型主要代码
 # 参数：
@@ -258,13 +263,13 @@ class EgoViT(nn.Module):
 		c = copy.deepcopy
 		attn = MultiHeadedAttention(h, d_model)
 		ff = PositionwiseFeedForward(d_model, d_ff, dropout)
-		# position = PositionalEncoding(d_model, dropout)
-		position = StraightForward()
+		position = PositionalEncoding(d_model, dropout)
+		# position = StraightForward()
 		self.model = EncoderDecoder(
 					Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
 					Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
 					nn.Sequential(c(position)),
-					nn.Sequential(Embeddings(d_model, pose_dim), c(position)),  ### decoder Embedding：embedding 51-dim to 240-dim
+					nn.Sequential(Embeddings(d_model, pose_dim), c(position)),  ### decoder Embedding：embedding 45-dim to 240-dim
 					Generator(d_model, pose_dim))
 
 		# 随机初始化参数，这非常重要

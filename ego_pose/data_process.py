@@ -231,6 +231,9 @@ class MoCapDataset(Dataset):
             keypoints_ = torch.from_numpy(np.load(os.path.join(self.dataset_path, "keypoints", dir + ".npy")))[ind_frame_in_mocap-L+1:ind_frame_in_mocap+1, :]
             # print("keypoints_ shape: ", keypoints_.shape)
             keypoints = keypoints_[:, 6:]
+            keypoints_x = keypoints[:,0:45:3]
+            keypoints_y = keypoints[:,1:45:3]
+            keypoints_z = keypoints[:,2:45:3]
             f = keypoints_[:, 0:3]
             u = keypoints_[:, 3:6]
             ### 将keypoints映射到[-1,1]之间
@@ -239,6 +242,7 @@ class MoCapDataset(Dataset):
             d_min = torch.min(keypoints, dim=1)[0].unsqueeze(1)
             # print("d_min shape: ", d_min.shape)
             dst = d_max - d_min
+            keypoints = torch.cat((keypoints_x, keypoints_y, keypoints_z), dim=-1)
             keypoints = ((keypoints - d_min) / dst - 0.5) / 0.5      
             # label = torch.cat([f, u, keypoints], dim=1)
             label = keypoints

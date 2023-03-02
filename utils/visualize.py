@@ -58,7 +58,7 @@ def DrawSkeleton(keypoints, head1=None, head2=None, image_name='Skeleton.jpg'):
 
     plt.savefig(image_name, dpi=300)
 
-# keypoints: ndarray [1, 51]
+# keypoints: ndarray [1, 45]
 def DrawSkeleton45(keypoints, head1=None, head2=None, image_name='Skeleton.jpg'):
     pos_x = keypoints[0:len(keypoints):3]
     pos_y = keypoints[1:len(keypoints):3]

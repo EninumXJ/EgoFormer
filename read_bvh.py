@@ -3,13 +3,13 @@ import pickle
 from mocap.pose import load_bvh_file
 from mocap.skeleton import Skeleton
 
-fname = '/data1/lty/dataset/egopose_dataset/datasets/traj/1205_take_15.bvh'
+fname = '/home/liumin/litianyi/workspace/data/datasets/traj/1205_take_15.bvh'
 with open(fname) as f:
     mocap = Bvh(f.read())
 print("Number of joints: ",len(mocap.get_joints_names()))
 print("Number of frames: ", mocap.nframes)
 print(mocap.get_joints_names())
-pname = '/data1/lty/dataset/egopose_dataset/datasets/traj/1205_take_15_traj.p'
+pname = '/home/liumin/litianyi/workspace/data/datasets/traj/1205_take_15_traj.p'
 traj = pickle.load(open(pname, 'rb'))
 print(traj[0].shape)
 

@@ -4,7 +4,7 @@ CONFIG_PATH=/home/liumin/litianyi/workspace/data/datasets/meta/meta_subject_01.y
 CUDA_VISIBLE_DEVICES=0 python train.py \
     --dataset_path $DATA_DIR \
     --config_path $CONFIG_PATH \
-    --exp_name train10 \
+    --exp_name train14 \
     --epochs 150 \
     --lr 0.1 \
     --batch_size 32 \
