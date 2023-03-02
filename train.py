@@ -156,7 +156,7 @@ def train(train_loader, model, optimizer, scheduler, device, batch_num=None, log
         # tgt_mask shape:(batch,length,length)
         output = model(src, tgt, src_mask, tgt_mask)
         # output shape:(batch,length,pose_dim)
-        loss = ComputeLoss_nohead(output, label, args.L, order='xxx')
+        loss = ComputeLoss_nohead(output, label, args.L, order='xyz')
         losses.update(loss.item(), label.shape[0])
         # optimizer.zero_grad()
         loss.backward()
@@ -228,7 +228,7 @@ def validate(val_loader, model, device, batch_num=None, logger=None, args=None):
             output = model(src, tgt, src_mask, tgt_mask)
             # output shape:(batch,length,pose_dim)
             
-            loss = ComputeLoss_nohead(output, label, args.L)
+            loss = ComputeLoss_nohead(output, label, args.L, order='xyz')
             losses.update(loss.item(), label.shape[0])
 
             # measure elapsed time

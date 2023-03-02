@@ -242,7 +242,7 @@ class MoCapDataset(Dataset):
             d_min = torch.min(keypoints, dim=1)[0].unsqueeze(1)
             # print("d_min shape: ", d_min.shape)
             dst = d_max - d_min
-            keypoints = torch.cat((keypoints_x, keypoints_y, keypoints_z), dim=-1)
+            # keypoints = torch.cat((keypoints_x, keypoints_y, keypoints_z), dim=-1)
             keypoints = ((keypoints - d_min) / dst - 0.5) / 0.5      
             # label = torch.cat([f, u, keypoints], dim=1)
             label = keypoints

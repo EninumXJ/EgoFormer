@@ -24,7 +24,7 @@ def inference(model, src, src_mask):
         )
     return ys
          
-exp_name = 'train13'
+exp_name = 'train14'
 length = 20
 path = os.getcwd()
 save_path = os.path.join(path, 'results', exp_name)
@@ -36,7 +36,7 @@ dataset_path = '/home/liumin/litianyi/workspace/data/datasets'
 config_path = '/home/liumin/litianyi/workspace/data/datasets/meta/meta_subject_01.yml'
 ### load checkpoints if exist
 
-resume = 'logs/train13/transformer_model_best.pth.tar'
+resume = 'logs/train14/transformer_model_best.pth.tar'
 # checkpoint = torch.load(resume)
 # model.load_state_dict(checkpoint['state_dict'])
 # model = nn.DataParallel(model, device_ids=[0,1]).cuda()

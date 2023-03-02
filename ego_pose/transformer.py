@@ -263,8 +263,8 @@ class EgoViT(nn.Module):
 		c = copy.deepcopy
 		attn = MultiHeadedAttention(h, d_model)
 		ff = PositionwiseFeedForward(d_model, d_ff, dropout)
-		position = PositionalEncoding(d_model, dropout)
-		# position = StraightForward()
+		# position = PositionalEncoding(d_model, dropout)
+		position = StraightForward()
 		self.model = EncoderDecoder(
 					Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
 					Decoder(DecoderLayer(d_model, c(attn), c(attn), c(ff), dropout), N),
