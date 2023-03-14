@@ -37,10 +37,10 @@ config_path = '/home/liumin/litianyi/workspace/data/datasets/meta/meta_subject_0
 ### load checkpoints if exist
 
 resume = 'logs/train14/transformer_model_best.pth.tar'
-# checkpoint = torch.load(resume)
-# model.load_state_dict(checkpoint['state_dict'])
+checkpoint = torch.load(resume)
+Model.load_state_dict(checkpoint['state_dict'])
 # model = nn.DataParallel(model, device_ids=[0,1]).cuda()
-# model.load_state_dict({k.replace('module.',''):v for k,v in torch.load(resume)['state_dict'].items()})   
+Model.load_state_dict({k.replace('module.',''):v for k,v in torch.load(resume)['state_dict'].items()})   
 Model = Model.to(device)
 val_data = MoCapDataset(dataset_path=dataset_path, 
                               config_path=config_path, 
